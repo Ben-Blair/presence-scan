@@ -29,7 +29,7 @@ Open the printed URL (default http://localhost:5173).
 
 ## Settings panel
 
-- **Orb** — color, size, brightness, halo, splat-glow intensity/radius, hover height.
+- **Orb** — color, size, brightness, splat-glow intensity/radius, hover height.
 - **Camera** — speeds, orbit-the-orb toggle.
 - **Cutaway** — auto/on/off, keep distance, fade softness. In auto mode, walls between
   you and the orb fade out whenever the camera leaves the room.

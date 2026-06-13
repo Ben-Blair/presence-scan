@@ -19,7 +19,7 @@ import {
 import { CameraControls } from './camera-controls.js';
 
 import { params } from './params.js';
-import { loadSpawnView, saveSpawnView } from './spawn-view.js';
+import { applyParams, resolveStartup, resetToDefaults, saveSession } from './settings-store.js';
 import { Orb } from './orb.js';
 import { SplatFX } from './splat-effects.js';
 import { OrbSources } from './orb-sources.js';
@@ -73,6 +73,9 @@ for (const key in assets) {
     app.assets.load(asset);
 }
 
+const startup = resolveStartup();
+applyParams(params, startup.params);
+
 app.start();
 
 function buildScene() {
@@ -120,17 +123,13 @@ function buildScene() {
     });
     app.root.addChild(camera);
 
-    const orbStart = new Vec3(center.x, params.source.floorY + params.orb.height, center.z);
-    const defaultEye = new Vec3(center.x + halfExtents.x * 0.4, params.source.floorY + 1.6, center.z + halfExtents.z * 0.4);
-    const defaultFocus = orbStart.clone();
-
-    const savedView = loadSpawnView();
-    const spawnEye = savedView
-        ? new Vec3(savedView.position.x, savedView.position.y, savedView.position.z)
-        : defaultEye.clone();
-    const spawnFocus = savedView
-        ? new Vec3(savedView.focus.x, savedView.focus.y, savedView.focus.z)
-        : defaultFocus.clone();
+    const view = startup.view;
+    const fallbackOrb = new Vec3(center.x, params.source.floorY + params.orb.height, center.z);
+    const spawnEye = new Vec3(view.position.x, view.position.y, view.position.z);
+    const spawnFocus = new Vec3(view.focus.x, view.focus.y, view.focus.z);
+    const orbStart = view.orb
+        ? new Vec3(view.orb.x, view.orb.y, view.orb.z)
+        : fallbackOrb;
     camera.setPosition(spawnEye);
 
     camera.addComponent('script');
@@ -186,6 +185,26 @@ function buildScene() {
     // ---------------------------------------------------------- orb sources
     const sources = new OrbSources(app, camera, orb, params, { center, halfExtents });
 
+    const applyView = (viewSettings) => {
+        const eye = new Vec3(viewSettings.position.x, viewSettings.position.y, viewSettings.position.z);
+        const focus = new Vec3(viewSettings.focus.x, viewSettings.focus.y, viewSettings.focus.z);
+        const orbPos = viewSettings.orb
+            ? new Vec3(viewSettings.orb.x, viewSettings.orb.y, viewSettings.orb.z)
+            : new Vec3(center.x, params.source.floorY + params.orb.height, center.z);
+        camera.setPosition(eye);
+        controls.reset(focus, eye);
+        orb.teleport(orbPos);
+    };
+
+    const saveCurrentSession = () => {
+        saveSession({
+            position: camera.getPosition(),
+            focus: controls.focusPoint.clone(),
+            orb: orb.getPosition()
+        }, params);
+        console.info('Saved settings for next load (view + controls). Reload to apply.');
+    };
+
     // ---------------------------------------------------------- settings
     const hooks = {
         sources,
@@ -209,7 +228,17 @@ function buildScene() {
         },
         connectSensor: () => sources.connectSensor(),
         disconnectSensor: () => sources.disconnectSensor(),
-        frameOrb: () => controls.focus(orb.getPosition())
+        frameOrb: () => controls.focus(orb.getPosition()),
+        saveSession: saveCurrentSession,
+        resetToDefaults: () => {
+            applyView(resetToDefaults(params));
+            hooks.onOrbChanged();
+            hooks.onCameraChanged();
+            hooks.onOccluderChanged();
+            hooks.onSourceModeChanged();
+            pane.refresh();
+            console.info('Reset to defaults.json.');
+        }
     };
     const pane = createSettingsPanel(params, hooks);
 
@@ -221,8 +250,7 @@ function buildScene() {
             params.camera.orbitOrb = !params.camera.orbitOrb;
             pane.refresh();
         } else if (e.key === KEY_H) {
-            saveSpawnView(camera.getPosition(), controls.focusPoint.clone());
-            console.info('Saved spawn view (position + look-at). Reload to start here.');
+            saveCurrentSession();
         }
     });
 
@@ -237,7 +265,7 @@ function buildScene() {
 
     app.on('update', (dt) => {
         sources.update(dt);
-        orb.update(dt, camera, params.orb.smoothing);
+        orb.update(dt, params.orb.smoothing);
 
         const orbPos = orb.getPosition();
         const camPos = camera.getPosition();
@@ -269,7 +297,9 @@ function buildScene() {
             cutOn ? round(orbPos.x, 0.03) : 0,
             cutOn ? round(orbPos.y, 0.03) : 0,
             cutOn ? round(orbPos.z, 0.03) : 0,
-            params.cutaway.distance, params.cutaway.softness
+            params.cutaway.distance, params.cutaway.softness,
+            round(camPos.x, 0.01), round(camPos.y, 0.01), round(camPos.z, 0.01),
+            params.orb.glowFacing
         ]);
     });
 }

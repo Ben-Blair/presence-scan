@@ -11,15 +11,18 @@ import { Pane } from 'tweakpane';
 export function createSettingsPanel(params, hooks) {
     const pane = new Pane({ title: 'Garage Viewer', expanded: true });
 
+    const session = pane.addFolder({ title: 'Session' });
+    session.addButton({ title: 'Save for next load (H)' }).on('click', () => hooks.saveSession());
+    session.addButton({ title: 'Reset to defaults' }).on('click', () => hooks.resetToDefaults());
+
     // --- Orb ---
     const orb = pane.addFolder({ title: 'Orb' });
     orb.addBinding(params.orb, 'color', { color: { type: 'float' }, label: 'color' });
     orb.addBinding(params.orb, 'size', { min: 0.02, max: 0.5, step: 0.01 });
     orb.addBinding(params.orb, 'coreBrightness', { min: 0, max: 8, step: 0.1, label: 'brightness' });
-    orb.addBinding(params.orb, 'haloSize', { min: 0, max: 3, step: 0.05, label: 'halo size' });
-    orb.addBinding(params.orb, 'haloOpacity', { min: 0, max: 2, step: 0.05, label: 'halo glow' });
     orb.addBinding(params.orb, 'glowIntensity', { min: 0, max: 6, step: 0.05, label: 'splat glow' });
     orb.addBinding(params.orb, 'glowRadius', { min: 0.1, max: 6, step: 0.05, label: 'glow radius' });
+    orb.addBinding(params.orb, 'glowFacing', { min: 0, max: 1, step: 0.05, label: 'glow facing' });
     orb.addBinding(params.orb, 'height', { min: 0, max: 3, step: 0.05, label: 'height (m)' });
     orb.addBinding(params.orb, 'smoothing', { min: 0.5, max: 20, step: 0.5 });
     orb.on('change', () => hooks.onOrbChanged());
@@ -41,6 +44,7 @@ export function createSettingsPanel(params, hooks) {
     });
     cut.addBinding(params.cutaway, 'distance', { min: 0.5, max: 10, step: 0.1, label: 'keep distance' });
     cut.addBinding(params.cutaway, 'softness', { min: 0.05, max: 4, step: 0.05 });
+    cut.addBinding(params.cutaway, 'wallCut', { min: 0.2, max: 3, step: 0.05, label: 'wall peel' });
 
     // --- Occlusion ---
     const occ = pane.addFolder({ title: 'Occlusion' });
