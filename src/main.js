@@ -12,12 +12,14 @@ import {
     EVENT_KEYDOWN,
     FILLMODE_FILL_WINDOW,
     KEY_F,
+    KEY_H,
     KEY_O,
     RESOLUTION_AUTO
 } from 'playcanvas';
 import { CameraControls } from './camera-controls.js';
 
 import { params } from './params.js';
+import { loadSpawnView, saveSpawnView } from './spawn-view.js';
 import { Orb } from './orb.js';
 import { SplatFX } from './splat-effects.js';
 import { OrbSources } from './orb-sources.js';
@@ -119,8 +121,17 @@ function buildScene() {
     app.root.addChild(camera);
 
     const orbStart = new Vec3(center.x, params.source.floorY + params.orb.height, center.z);
-    const eyePos = new Vec3(center.x + halfExtents.x * 0.4, params.source.floorY + 1.6, center.z + halfExtents.z * 0.4);
-    camera.setPosition(eyePos);
+    const defaultEye = new Vec3(center.x + halfExtents.x * 0.4, params.source.floorY + 1.6, center.z + halfExtents.z * 0.4);
+    const defaultFocus = orbStart.clone();
+
+    const savedView = loadSpawnView();
+    const spawnEye = savedView
+        ? new Vec3(savedView.position.x, savedView.position.y, savedView.position.z)
+        : defaultEye.clone();
+    const spawnFocus = savedView
+        ? new Vec3(savedView.focus.x, savedView.focus.y, savedView.focus.z)
+        : defaultFocus.clone();
+    camera.setPosition(spawnEye);
 
     camera.addComponent('script');
     const controls = camera.script.create(CameraControls, {
@@ -131,7 +142,7 @@ function buildScene() {
             zoomRange: { x: 0.1, y: 60 }
         }
     });
-    controls.reset(orbStart, eyePos);
+    controls.reset(spawnFocus, spawnEye);
 
     // ---------------------------------------------------------- orb
     const orb = new Orb(app);
@@ -209,6 +220,9 @@ function buildScene() {
         } else if (e.key === KEY_O) {
             params.camera.orbitOrb = !params.camera.orbitOrb;
             pane.refresh();
+        } else if (e.key === KEY_H) {
+            saveSpawnView(camera.getPosition(), controls.focusPoint.clone());
+            console.info('Saved spawn view (position + look-at). Reload to start here.');
         }
     });
 

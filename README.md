@@ -24,6 +24,7 @@ Open the printed URL (default http://localhost:5173).
 | Shift | Move faster |
 | Double-click | Place the orb on the floor |
 | F | Fly camera to frame the orb |
+| H | Save current view as the spawn perspective (persists across reloads) |
 | O | Toggle orbit-the-orb mode |
 
 ## Settings panel
