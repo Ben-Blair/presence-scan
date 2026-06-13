@@ -1,0 +1,48 @@
+{
+  "view": {
+    "position": { "x": -2.722, "y": 1.780, "z": 1.770 },
+    "focus": { "x": -0.621, "y": 0.572, "z": 0.718 },
+    "orb": { "x": -0.985, "y": 0.352, "z": 0.014 }
+  },
+  "params": {
+    "orb": {
+      "color": { "r": 0.25, "g": 0.65, "b": 1.0 },
+      "size": 0.12,
+      "coreBrightness": 2.0,
+      "glowIntensity": 1.0,
+      "glowRadius": 1.2,
+      "glowFacing": 1.0,
+      "height": 0.9,
+      "smoothing": 6.0
+    },
+    "camera": {
+      "orbitOrb": false,
+      "moveSpeed": 2.5,
+      "moveFastSpeed": 7,
+      "rotateSpeed": 0.25,
+      "renderScale": 1.5
+    },
+    "cutaway": {
+      "mode": "auto",
+      "distance": 2.5,
+      "softness": 1.2,
+      "wallCut": 1.5
+    },
+    "occluder": {
+      "enabled": false
+    },
+    "source": {
+      "mode": "click",
+      "keyboardSpeed": 2.5,
+      "demoSpeed": 0.25,
+      "floorY": 0,
+      "sensor": {
+        "url": "ws://localhost:8081",
+        "originX": 0,
+        "originZ": 0,
+        "rotationDeg": 0,
+        "scale": 0.001
+      }
+    }
+  }
+}

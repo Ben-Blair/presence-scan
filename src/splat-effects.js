@@ -11,6 +11,8 @@ uniform vec3 uOrbPos;
 uniform vec3 uOrbColor;
 uniform float uOrbIntensity;
 uniform float uOrbRadius;
+uniform vec3 uViewPos;
+uniform float uGlowFacing;
 
 uniform float uCutEnabled;
 uniform vec3 uCutCamPos;
@@ -20,10 +22,30 @@ uniform float uCutSoft;
 uniform vec3 uRoomMin;
 uniform vec3 uRoomMax;
 
+// approximate per-splat surface normal + anisotropy, computed in
+// modifySplatRotationScale and consumed in modifySplatColor (same shader run)
+vec3 gSplatNormal = vec3(0.0);
+float gSplatAniso = 0.0;
+
+vec3 quatRotate(vec4 q, vec3 v) {
+    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
 void modifySplatCenter(inout vec3 center) {
 }
 
 void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
+    // the gaussian's flattest axis (smallest scale) approximates the surface normal
+    vec3 s = scale;
+    vec3 axis;
+    if (s.x <= s.y && s.x <= s.z) axis = vec3(1.0, 0.0, 0.0);
+    else if (s.y <= s.z) axis = vec3(0.0, 1.0, 0.0);
+    else axis = vec3(0.0, 0.0, 1.0);
+    gSplatNormal = normalize(quatRotate(rotation, axis));
+
+    float minS = min(s.x, min(s.y, s.z));
+    float maxS = max(s.x, max(s.y, s.z));
+    gSplatAniso = maxS > 0.0 ? clamp((maxS - minS) / maxS, 0.0, 1.0) : 0.0;
 }
 
 void modifySplatColor(vec3 center, inout vec4 color) {
@@ -34,7 +56,16 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         float atten = 1.0 / (1.0 + (d * d) / (r * r));
         // hard cutoff well outside the radius so distant splats are untouched
         float cutoff = smoothstep(r * 4.0, r, d);
-        color.rgb += uOrbColor * (uOrbIntensity * atten * cutoff);
+
+        // only glow surfaces oriented toward the orb. flip the (sign-ambiguous)
+        // normal to the visible face, then test against the direction to the orb.
+        vec3 n = gSplatNormal;
+        if (dot(n, normalize(uViewPos - center)) < 0.0) n = -n;
+        float facing = smoothstep(-0.1, 0.4, dot(n, normalize(uOrbPos - center)));
+        // round/isotropic splats have no reliable normal, so fall back to full glow
+        facing = mix(1.0, facing, gSplatAniso * uGlowFacing);
+
+        color.rgb += uOrbColor * (uOrbIntensity * atten * cutoff * facing);
     }
 
     // cutaway: hide splats on the camera side of the keep volume, and hide
@@ -63,6 +94,8 @@ uniform uOrbPos: vec3f;
 uniform uOrbColor: vec3f;
 uniform uOrbIntensity: f32;
 uniform uOrbRadius: f32;
+uniform uViewPos: vec3f;
+uniform uGlowFacing: f32;
 
 uniform uCutEnabled: f32;
 uniform uCutCamPos: vec3f;
@@ -72,10 +105,34 @@ uniform uCutSoft: f32;
 uniform uRoomMin: vec3f;
 uniform uRoomMax: vec3f;
 
+// approximate per-splat surface normal + anisotropy, computed in
+// modifySplatRotationScale and consumed in modifySplatColor (same shader run)
+var<private> gSplatNormal: vec3f = vec3f(0.0);
+var<private> gSplatAniso: f32 = 0.0;
+
+fn quatRotate(q: vec4f, v: vec3f) -> vec3f {
+    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
 fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
 
 fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
+    // the gaussian's flattest axis (smallest scale) approximates the surface normal
+    let s = (*scale);
+    var axis: vec3f;
+    if (s.x <= s.y && s.x <= s.z) {
+        axis = vec3f(1.0, 0.0, 0.0);
+    } else if (s.y <= s.z) {
+        axis = vec3f(0.0, 1.0, 0.0);
+    } else {
+        axis = vec3f(0.0, 0.0, 1.0);
+    }
+    gSplatNormal = normalize(quatRotate((*rotation), axis));
+
+    let minS = min(s.x, min(s.y, s.z));
+    let maxS = max(s.x, max(s.y, s.z));
+    gSplatAniso = select(0.0, clamp((maxS - minS) / maxS, 0.0, 1.0), maxS > 0.0);
 }
 
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
@@ -84,7 +141,18 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
         let r = max(uniform.uOrbRadius, 0.001);
         let atten = 1.0 / (1.0 + (d * d) / (r * r));
         let cutoff = smoothstep(r * 4.0, r, d);
-        (*color) = vec4f((*color).rgb + uniform.uOrbColor * (uniform.uOrbIntensity * atten * cutoff), (*color).a);
+
+        // only glow surfaces oriented toward the orb. flip the (sign-ambiguous)
+        // normal to the visible face, then test against the direction to the orb.
+        var n = gSplatNormal;
+        if (dot(n, normalize(uniform.uViewPos - center)) < 0.0) {
+            n = -n;
+        }
+        var facing = smoothstep(-0.1, 0.4, dot(n, normalize(uniform.uOrbPos - center)));
+        // round/isotropic splats have no reliable normal, so fall back to full glow
+        facing = mix(1.0, facing, gSplatAniso * uniform.uGlowFacing);
+
+        (*color) = vec4f((*color).rgb + uniform.uOrbColor * (uniform.uOrbIntensity * atten * cutoff * facing), (*color).a);
     }
 
     if (uniform.uCutEnabled > 0.5) {
@@ -148,6 +216,8 @@ export class SplatFX {
         g.setParameter('uCutFocusPos', [p[12], p[13], p[14]]);
         g.setParameter('uCutDist', p[15]);
         g.setParameter('uCutSoft', p[16]);
+        g.setParameter('uViewPos', [p[17], p[18], p[19]]);
+        g.setParameter('uGlowFacing', p[20]);
         return true;
     }
 }
