@@ -22,14 +22,13 @@
       "moveFastSpeed": 7,
       "rotateSpeed": 0.25,
       "renderScale": 1.5,
-      "cinematic": {
-        "distance": 3.0,
-        "elevation": 30,
-        "minDistance": 1.8,
-        "orbitSpeed": 1.2,
-        "posSmoothing": 1.5,
-        "lookSmoothing": 4.0
-      }
+      "waypoint": {
+        "transitionDuration": 1.5,
+        "lookSmoothing": 4.0,
+        "dwellTime": 0.5,
+        "boundaryMargin": 0.3
+      },
+      "anchors": []
     },
     "cutaway": {
       "mode": "auto",

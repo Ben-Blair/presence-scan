@@ -11,6 +11,10 @@ import {
     Vec3,
     EVENT_KEYDOWN,
     FILLMODE_FILL_WINDOW,
+    KEY_1,
+    KEY_2,
+    KEY_3,
+    KEY_4,
     KEY_F,
     KEY_H,
     KEY_O,
@@ -23,7 +27,7 @@ import { applyParams, resolveStartup, resetToDefaults, saveSession } from './set
 import { Orb } from './orb.js';
 import { SplatFX } from './splat-effects.js';
 import { OrbSources } from './orb-sources.js';
-import { CinematicCamera } from './cinematic-camera.js';
+import { WaypointCamera } from './waypoint-camera.js';
 import { createSettingsPanel } from './settings.js';
 
 const canvas = document.getElementById('app-canvas');
@@ -114,6 +118,40 @@ function buildScene() {
     const halfExtents = worldAabb.halfExtents.clone();
     params.source.floorY = worldAabb.getMin().y + 0.05;
 
+    // Auto-derive default zones from the runtime room bounds when none are
+    // configured. The splat's world coordinates aren't known until load, so
+    // hand-hardcoding boxes up front is impractical. This partitions the floor
+    // into four quadrants and mounts each quadrant's camera high in the
+    // diagonally-opposite room corner, so it looks *across* the room at an
+    // oblique security-camera angle rather than straight down. Captured/edited
+    // anchors (persisted via the settings store in params.camera.anchors)
+    // override these.
+    if (params.camera.anchors.length === 0) {
+        const ceilingY = center.y + halfExtents.y - 0.3;
+        const inset = 0.4; // keep the camera off the corner walls a touch
+        const minX = center.x - halfExtents.x;
+        const maxX = center.x + halfExtents.x;
+        const minZ = center.z - halfExtents.z;
+        const maxZ = center.z + halfExtents.z;
+
+        // each zone: floor quadrant box + the opposite corner it's viewed from
+        const zones = [
+            { name: 'NW', box: { minX, minZ, maxX: center.x, maxZ: center.z }, corner: { x: maxX, z: maxZ } },
+            { name: 'NE', box: { minX: center.x, minZ, maxX, maxZ: center.z }, corner: { x: minX, z: maxZ } },
+            { name: 'SW', box: { minX, minZ: center.z, maxX: center.x, maxZ }, corner: { x: maxX, z: minZ } },
+            { name: 'SE', box: { minX: center.x, minZ: center.z, maxX, maxZ }, corner: { x: minX, z: minZ } }
+        ];
+        for (const z of zones) {
+            // inset the corner toward room center so the camera sits just inside
+            const eye = {
+                x: z.corner.x + Math.sign(center.x - z.corner.x) * inset,
+                y: ceilingY,
+                z: z.corner.z + Math.sign(center.z - z.corner.z) * inset
+            };
+            params.camera.anchors.push({ name: z.name, box: z.box, eye });
+        }
+    }
+
     // ---------------------------------------------------------- camera
     const camera = new Entity('camera');
     camera.addComponent('camera', {
@@ -186,8 +224,8 @@ function buildScene() {
     // ---------------------------------------------------------- orb sources
     const sources = new OrbSources(app, camera, orb, params, { center, halfExtents });
 
-    // ---------------------------------------------------------- cinematic cam
-    const cinematic = new CinematicCamera(camera, controls, orb, { center, halfExtents }, params);
+    // ---------------------------------------------------------- waypoint cam
+    const autoCam = new WaypointCamera(camera, controls, orb, { center, halfExtents }, params);
 
     const applyView = (viewSettings) => {
         const eye = new Vec3(viewSettings.position.x, viewSettings.position.y, viewSettings.position.z);
@@ -209,9 +247,29 @@ function buildScene() {
         console.info('Saved settings for next load (view + controls). Reload to apply.');
     };
 
+    // capture the current camera position as a zone's anchor eye. Turn anchor
+    // follow OFF, fly the manual camera to an ideal vantage, then capture (zone
+    // number key, or the panel button). Persists via the session store.
+    const captureAnchor = (i) => {
+        const anchor = params.camera.anchors[i];
+        if (!anchor) {
+            console.warn(`No zone ${i + 1} to capture (only ${params.camera.anchors.length} zones).`);
+            return;
+        }
+        if (params.camera.orbitOrb) {
+            console.warn('Turn "anchor follow" off before capturing — the camera is auto-driven while it is on.');
+            return;
+        }
+        const p = camera.getPosition();
+        anchor.eye = { x: p.x, y: p.y, z: p.z };
+        saveCurrentSession();
+        console.info(`Captured camera position for zone "${anchor.name}".`);
+    };
+
     // ---------------------------------------------------------- settings
     const hooks = {
         sources,
+        captureAnchor,
         onOrbChanged: () => orb.applyParams(params.orb),
         onCameraChanged: () => {
             controls.moveSpeed = params.camera.moveSpeed;
@@ -256,11 +314,19 @@ function buildScene() {
             pane.refresh();
         } else if (e.key === KEY_H) {
             saveCurrentSession();
+        } else if (e.key === KEY_1) {
+            captureAnchor(0);
+        } else if (e.key === KEY_2) {
+            captureAnchor(1);
+        } else if (e.key === KEY_3) {
+            captureAnchor(2);
+        } else if (e.key === KEY_4) {
+            captureAnchor(3);
         }
     });
 
     // debug handle for console inspection
-    window.__viewer = { app, splat, occluder, camera, controls, orb, sources, center, halfExtents, params };
+    window.__viewer = { app, splat, occluder, camera, controls, orb, sources, autoCam, center, halfExtents, params };
 
     // ---------------------------------------------------------- per-frame
     const roomBox = new BoundingBox(center.clone(), halfExtents.clone());
@@ -271,16 +337,16 @@ function buildScene() {
         sources.update(dt);
         orb.update(dt, params.orb.smoothing);
 
-        // cinematic follow mode: drive the camera automatically (suspends the
+        // anchor follow mode: drive the camera automatically (suspends the
         // manual CameraControls while active)
-        if (params.camera.orbitOrb !== cinematic.active) {
+        if (params.camera.orbitOrb !== autoCam.active) {
             if (params.camera.orbitOrb) {
-                cinematic.start();
+                autoCam.start();
             } else {
-                cinematic.stop();
+                autoCam.stop();
             }
         }
-        cinematic.update(dt);
+        autoCam.update(dt);
 
         const orbPos = orb.getPosition();
         const camPos = camera.getPosition();
