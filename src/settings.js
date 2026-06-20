@@ -38,10 +38,9 @@ export function createSettingsPanel(params, hooks) {
     cam.addButton({ title: 'Frame orb (F)' }).on('click', () => hooks.frameOrb());
 
     const way = cam.addFolder({ title: 'Anchor camera', expanded: false });
-    way.addBinding(params.camera.waypoint, 'transitionDuration', { min: 0.3, max: 4, step: 0.1, label: 'glide time (s)' });
+    way.addBinding(params.camera.waypoint, 'railSmoothing', { min: 0.5, max: 8, step: 0.1, label: 'rail follow speed' });
+    way.addBinding(params.camera.waypoint, 'parkBias', { min: 0, max: 1, step: 0.05, label: 'stick at corners' });
     way.addBinding(params.camera.waypoint, 'lookSmoothing', { min: 0.5, max: 12, step: 0.5, label: 'aim speed' });
-    way.addBinding(params.camera.waypoint, 'dwellTime', { min: 0, max: 2, step: 0.1, label: 'switch dwell (s)' });
-    way.addBinding(params.camera.waypoint, 'boundaryMargin', { min: 0, max: 1, step: 0.05, label: 'zone margin (m)' });
 
     // Set each zone's camera position by hand: turn anchor follow off, fly the
     // camera to a good vantage, then click (or press the zone number key).

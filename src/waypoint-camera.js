@@ -1,25 +1,26 @@
-import { Vec3 } from 'playcanvas';
+import { Vec3, math } from 'playcanvas';
 
 const tmpV1 = new Vec3();
 
-/** Ease-in/out curve for the anchor-to-anchor glide. */
-const smoothstep = (t) => t * t * (3 - 2 * t);
-
 /**
- * Fixed Waypoint Anchor + Smooth Look-At camera.
+ * Anchor camera that rides a continuous rail loop.
  *
- * The garage floor is partitioned into zones (axis-aligned XZ boxes). Each zone
- * owns one hand-placed, high-up "anchor" camera position — like a virtual
- * security camera mounted in an open interior spot, so it never clips through
- * the splat walls (no raycasting needed). The camera parks on the anchor of the
- * zone the orb is in and only ever *rotates* to keep the orb framed. When the
- * orb settles in a new zone the camera glides to that zone's anchor over a fixed
- * duration.
+ * The floor is partitioned into zones (axis-aligned XZ boxes), each owning one
+ * hand-placed, high-up "anchor" camera position. Rather than snapping the camera
+ * to one anchor at a time, the anchors are treated as nodes of two co-indexed
+ * closed loops, ordered around the room:
  *
- * Three independent concerns:
- *   1. Zone selection - discrete + hysteretic (boundary margin + dwell timer).
- *   2. Position       - a timed LERP between two fixed anchor endpoints.
- *   3. Rotation       - continuous exp-smoothing toward the live orb, every frame.
+ *   - control loop : polyline through the zone CENTERS. The orb is projected
+ *                     onto it to get a continuous rail parameter s in [0, N).
+ *   - rail loop    : polyline through the anchor EYES. The camera sits at the
+ *                     point on this loop at parameter s.
+ *
+ * So when the orb rests in a zone center the camera parks on that corner anchor;
+ * as the orb drifts toward a boundary the camera pre-slides along the track to
+ * the neighbouring anchor, and crosses the boundary mid-track with no abrupt
+ * reposition. Because the camera is always *on* the rail (never the interior
+ * centroid) the oblique across-the-room angle is preserved. The camera only ever
+ * rotates to keep the orb framed (active target lock).
  */
 export class WaypointCamera {
     /**
@@ -39,64 +40,91 @@ export class WaypointCamera {
         this.active = false;
         this._camPos = new Vec3();
         this._lookTarget = new Vec3();
-
-        // position transition state machine
-        this._activeZone = -1;       // zone whose anchor we're parked at / heading to
-        this._fromPos = new Vec3();  // tween start (snapshot of camera at commit)
-        this._toPos = new Vec3();    // tween end (target anchor eye)
-        this._t = 1;                 // tween progress 0..1 (1 = settled)
-
-        // hysteresis
-        this._candidate = -1;        // zone the orb has newly entered, pending dwell
-        this._dwell = 0;             // seconds the orb has continuously been in candidate
+        this._railS = 0;             // current cyclic rail parameter in [0, N)
     }
 
     get _cfg() { return this.params.camera.waypoint; }
     get _anchors() { return this.params.camera.anchors; }
 
+    /** XZ center of an anchor's zone box. */
+    _zoneCenterX(a) { return (a.box.minX + a.box.maxX) * 0.5; }
+    _zoneCenterZ(a) { return (a.box.minZ + a.box.maxZ) * 0.5; }
+
     /**
-     * Index of the zone whose XZ box contains the orb. The currently-active zone
-     * is inflated by `boundaryMargin` so the orb must clearly leave it before any
-     * other zone is considered (first hysteresis layer). Returns -1 if outside
-     * every zone.
+     * Anchor indices ordered by the bearing of their zone center around the room
+     * center, so consecutive entries are spatially adjacent (the loop goes around
+     * the room and doesn't self-cross). Recomputed each frame so captured/edited
+     * anchors stay live.
      */
-    _zoneAt(orbPos) {
+    _loopOrder() {
+        const c = this.roomBounds.center;
         const anchors = this._anchors;
-        for (let i = 0; i < anchors.length; i++) {
-            const b = anchors[i].box;
-            const m = (i === this._activeZone) ? this._cfg.boundaryMargin : 0;
-            if (orbPos.x >= b.minX - m && orbPos.x <= b.maxX + m &&
-                orbPos.z >= b.minZ - m && orbPos.z <= b.maxZ + m) {
-                return i;
-            }
-        }
-        return -1;
+        const idx = anchors.map((_, i) => i);
+        idx.sort((i, j) => {
+            const ai = Math.atan2(this._zoneCenterZ(anchors[i]) - c.z, this._zoneCenterX(anchors[i]) - c.x);
+            const aj = Math.atan2(this._zoneCenterZ(anchors[j]) - c.z, this._zoneCenterX(anchors[j]) - c.x);
+            return ai - aj;
+        });
+        return idx;
     }
 
-    /** Nearest zone by XZ distance to its box center (fallback when between zones). */
-    _nearestZone(orbPos) {
+    /**
+     * Project the orb onto the control loop (zone centers in loop order) and
+     * return { s, radius }: s = segmentIndex + fraction (cyclic), radius = orb's
+     * horizontal distance from the room center (for the center deadzone gate).
+     */
+    _projectToControlLoop(order, orbPos) {
         const anchors = this._anchors;
-        let best = 0;
+        const n = order.length;
         let bestD = Infinity;
-        for (let i = 0; i < anchors.length; i++) {
-            const b = anchors[i].box;
-            const cx = (b.minX + b.maxX) * 0.5;
-            const cz = (b.minZ + b.maxZ) * 0.5;
-            const dx = orbPos.x - cx;
-            const dz = orbPos.z - cz;
+        let bestS = 0;
+        for (let k = 0; k < n; k++) {
+            const a = anchors[order[k]];
+            const b = anchors[order[(k + 1) % n]];
+            const ax = this._zoneCenterX(a), az = this._zoneCenterZ(a);
+            const bx = this._zoneCenterX(b), bz = this._zoneCenterZ(b);
+            const ex = bx - ax, ez = bz - az;
+            const len2 = ex * ex + ez * ez;
+            // closest point on segment [a, b] to the orb, in XZ
+            let t = len2 > 1e-9 ? ((orbPos.x - ax) * ex + (orbPos.z - az) * ez) / len2 : 0;
+            t = math.clamp(t, 0, 1);
+            const px = ax + ex * t, pz = az + ez * t;
+            const dx = orbPos.x - px, dz = orbPos.z - pz;
             const d = dx * dx + dz * dz;
-            if (d < bestD) { bestD = d; best = i; }
+            if (d < bestD) { bestD = d; bestS = k + t; }
         }
-        return best;
+        const c = this.roomBounds.center;
+        const rx = orbPos.x - c.x, rz = orbPos.z - c.z;
+        return { s: bestS, radius: Math.sqrt(rx * rx + rz * rz) };
     }
 
-    /** Begin a timed glide from the current camera position to a zone's anchor. */
-    _beginTransition(toZone) {
-        const e = this._anchors[toZone].eye;
-        this._fromPos.copy(this._camPos);
-        this._toPos.set(e.x, e.y, e.z);
-        this._t = 0;
-        this._activeZone = toZone;
+    /** Eye position at rail parameter s, with the park curve applied to the fraction. */
+    _evalRail(order, s) {
+        const anchors = this._anchors;
+        const n = order.length;
+        const k = Math.floor(s) % n;
+        let frac = s - Math.floor(s);
+        // park curve: smootherstep pushes the fraction toward 0/1 (toward the
+        // anchors) so the camera sticks at corners, sharpened by parkBias.
+        const smoother = frac * frac * frac * (frac * (frac * 6 - 15) + 10);
+        frac = math.lerp(frac, smoother, math.clamp(this._cfg.parkBias, 0, 1));
+        const ea = anchors[order[k]].eye;
+        const eb = anchors[order[(k + 1) % n]].eye;
+        return tmpV1.set(
+            math.lerp(ea.x, eb.x, frac),
+            math.lerp(ea.y, eb.y, frac),
+            math.lerp(ea.z, eb.z, frac)
+        );
+    }
+
+    /** Ease `cur` toward `target` along the shorter arc of a length-N ring. */
+    _easeCyclic(cur, target, t, n) {
+        let diff = (target - cur) % n;
+        if (diff > n / 2) diff -= n;
+        if (diff < -n / 2) diff += n;
+        let next = cur + diff * t;
+        next = ((next % n) + n) % n;
+        return next;
     }
 
     /** Begin waypoint control: capture current pose and suspend manual input. */
@@ -106,16 +134,12 @@ export class WaypointCamera {
 
         this._camPos.copy(this.camera.getPosition());
         this._lookTarget.copy(this.orb.getPosition());
-        this._candidate = -1;
-        this._dwell = 0;
 
         if (this._anchors.length > 0) {
-            const orbPos = this.orb.getPosition();
-            const z = this._zoneAt(orbPos);
-            // force a fresh transition (glide) into the orb's zone, even if we
-            // happen to start inside it
-            this._activeZone = -1;
-            this._beginTransition(z >= 0 ? z : this._nearestZone(orbPos));
+            // seed the rail parameter at the orb's current spot; _camPos eases in
+            // from the manual pose to the rail point over the next frames
+            const order = this._loopOrder();
+            this._railS = this._projectToControlLoop(order, this.orb.getPosition()).s;
         }
 
         this.controls.enabled = false;
@@ -140,39 +164,26 @@ export class WaypointCamera {
 
         const cfg = this._cfg;
         const orbPos = this.orb.getPosition();
+        const order = this._loopOrder();
+        const n = order.length;
 
-        // ---- 1. ZONE DETECTION + HYSTERESIS -----------------------------
-        const zone = this._zoneAt(orbPos);
-        if (zone >= 0 && zone !== this._activeZone) {
-            // orb is in a different valid zone - require it to dwell there
-            // continuously before committing the switch (second hysteresis layer)
-            if (zone === this._candidate) {
-                this._dwell += dt;
-            } else {
-                this._candidate = zone;
-                this._dwell = 0;
-            }
-            if (this._dwell >= cfg.dwellTime) {
-                this._beginTransition(zone);
-                this._candidate = -1;
-                this._dwell = 0;
-            }
-        } else {
-            // back in the active zone, or outside every zone: cancel any pending
-            // switch and hold the current anchor
-            this._candidate = -1;
-            this._dwell = 0;
-        }
+        // ---- 1. PROJECT ORB ONTO THE CONTROL LOOP -> rail target ---------
+        const { s: sTarget, radius } = this._projectToControlLoop(order, orbPos);
 
-        // ---- 2. TIMED POSITION TWEEN (anchor A -> anchor B) -------------
-        if (this._t < 1) {
-            this._t = Math.min(1, this._t + dt / Math.max(cfg.transitionDuration, 0.001));
-            this._camPos.lerp(this._fromPos, this._toPos, smoothstep(this._t));
-        } else {
-            this._camPos.copy(this._toPos); // parked exactly on the anchor
-        }
+        // ---- 2. RIDE THE RAIL --------------------------------------------
+        // ease s along the loop toward the target; gate the rate by the orb's
+        // radius from center so noise near the middle (where the projection is
+        // ill-conditioned) doesn't spin the rail.
+        const r0 = Math.max(this.roomBounds.halfExtents.x, this.roomBounds.halfExtents.z) * 0.25;
+        const radiusGate = math.clamp(radius / Math.max(r0, 0.001), 0, 1);
+        const sT = (1 - Math.exp(-cfg.railSmoothing * dt)) * radiusGate;
+        this._railS = this._easeCyclic(this._railS, sTarget, sT, n);
 
-        // ---- 3. ACTIVE TARGET LOCK (every frame) ------------------------
+        // glide the camera toward the rail point
+        const posT = 1 - Math.exp(-cfg.railSmoothing * dt);
+        this._camPos.lerp(this._camPos, this._evalRail(order, this._railS), posT);
+
+        // ---- 3. ACTIVE TARGET LOCK (every frame) -------------------------
         const lookT = 1 - Math.exp(-cfg.lookSmoothing * dt);
         this._lookTarget.lerp(this._lookTarget, orbPos, lookT);
 

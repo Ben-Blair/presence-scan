@@ -23,10 +23,9 @@
       "rotateSpeed": 0.25,
       "renderScale": 1.5,
       "waypoint": {
-        "transitionDuration": 1.5,
+        "railSmoothing": 2.5,
         "lookSmoothing": 4.0,
-        "dwellTime": 0.5,
-        "boundaryMargin": 0.3
+        "parkBias": 0.6
       },
       "anchors": []
     },
