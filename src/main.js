@@ -6,7 +6,6 @@ import {
     Entity,
     Keyboard,
     Mouse,
-    StandardMaterial,
     TouchDevice,
     Vec3,
     EVENT_KEYDOWN,
@@ -18,6 +17,7 @@ import {
     KEY_F,
     KEY_H,
     KEY_O,
+    KEY_P,
     RESOLUTION_AUTO
 } from 'playcanvas';
 import { CameraControls } from './camera-controls.js';
@@ -29,6 +29,7 @@ import { SplatFX } from './splat-effects.js';
 import { OrbSources } from './orb-sources.js';
 import { WaypointCamera } from './waypoint-camera.js';
 import { createSettingsPanel } from './settings.js';
+import { isTypingInPanel } from './dom-utils.js';
 
 const canvas = document.getElementById('app-canvas');
 const loadingEl = document.getElementById('loading');
@@ -91,17 +92,15 @@ function buildScene() {
     splat.setLocalEulerAngles(180, 0, 0);
     app.root.addChild(splat);
 
-    // ---------------------------------------------------------- occluder
-    // invisible depth-only render of the collision mesh: gives the orb crisp
-    // occlusion behind walls/objects. Also the most reliable source of the
-    // actual room bounds (the raw splat AABB is bloated by floater outliers).
-    const occluder = assets.collision.resource.instantiateRenderEntity();
-    occluder.name = 'depth-occluder';
-    app.root.addChild(occluder);
-
+    // ---------------------------------------------------------- room bounds
+    // the collision mesh gives the true room bounds (the raw splat AABB is
+    // bloated by floater outliers); it's only used for measurement, never
+    // rendered.
+    const collisionMesh = assets.collision.resource.instantiateRenderEntity();
+    app.root.addChild(collisionMesh);
     const worldAabb = new BoundingBox();
     let aabbInit = false;
-    occluder.findComponents('render').forEach((render) => {
+    collisionMesh.findComponents('render').forEach((render) => {
         render.meshInstances.forEach((mi) => {
             if (!aabbInit) {
                 worldAabb.copy(mi.aabb);
@@ -114,6 +113,7 @@ function buildScene() {
     if (!aabbInit) {
         worldAabb.setFromTransformedAabb(assets.garage.resource.aabb, splat.getWorldTransform());
     }
+    collisionMesh.destroy();
     const center = worldAabb.center.clone();
     const halfExtents = worldAabb.halfExtents.clone();
     params.source.floorY = worldAabb.getMin().y + 0.05;
@@ -201,26 +201,6 @@ function buildScene() {
         splatFX.setRoomBounds(min, max);
     }
 
-    // depth-only material for the occluder
-    const depthOnly = new StandardMaterial();
-    depthOnly.redWrite = false;
-    depthOnly.greenWrite = false;
-    depthOnly.blueWrite = false;
-    depthOnly.alphaWrite = false;
-    depthOnly.depthWrite = true;
-    // push the occluder surface slightly away from the camera so it sits
-    // behind the splat "fuzz" instead of clipping it
-    depthOnly.depthBias = 0.6;
-    depthOnly.slopeDepthBias = 1.0;
-    depthOnly.update();
-    occluder.findComponents('render').forEach((render) => {
-        render.meshInstances.forEach((mi) => {
-            mi.material = depthOnly;
-            mi.castShadow = false;
-        });
-    });
-    occluder.enabled = params.occluder.enabled;
-
     // ---------------------------------------------------------- orb sources
     const sources = new OrbSources(app, camera, orb, params, { center, halfExtents });
 
@@ -279,9 +259,6 @@ function buildScene() {
             app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio, params.camera.renderScale);
             app.resizeCanvas();
         },
-        onOccluderChanged: () => {
-            occluder.enabled = params.occluder.enabled;
-        },
         onSourceModeChanged: () => {
             if (params.source.mode === 'sensor') {
                 sources.connectSensor();
@@ -297,7 +274,6 @@ function buildScene() {
             applyView(resetToDefaults(params));
             hooks.onOrbChanged();
             hooks.onCameraChanged();
-            hooks.onOccluderChanged();
             hooks.onSourceModeChanged();
             pane.refresh();
             console.info('Reset to defaults.json.');
@@ -307,7 +283,10 @@ function buildScene() {
 
     // ---------------------------------------------------------- hotkeys
     app.keyboard.on(EVENT_KEYDOWN, (e) => {
-        if (e.key === KEY_F) {
+        if (isTypingInPanel()) return;
+        if (e.key === KEY_P) {
+            pane.toggle();
+        } else if (e.key === KEY_F) {
             controls.focus(orb.getPosition());
         } else if (e.key === KEY_O) {
             params.camera.orbitOrb = !params.camera.orbitOrb;
@@ -326,7 +305,7 @@ function buildScene() {
     });
 
     // debug handle for console inspection
-    window.__viewer = { app, splat, occluder, camera, controls, orb, sources, autoCam, center, halfExtents, params };
+    window.__viewer = { app, splat, camera, controls, orb, sources, autoCam, center, halfExtents, params };
 
     // ---------------------------------------------------------- per-frame
     const roomBox = new BoundingBox(center.clone(), halfExtents.clone());
@@ -355,10 +334,6 @@ function buildScene() {
         const outside = !roomBox.containsPoint(camPos);
         const cutOn = params.cutaway.mode === 'on' ||
             (params.cutaway.mode === 'auto' && outside);
-
-        // the depth occluder blocks the view into the room from outside, so
-        // suspend it while the cutaway is active
-        occluder.enabled = params.occluder.enabled && !cutOn;
 
         // push shader uniforms (quantized; only re-renders splat when changed)
         splatFX.setParams([
