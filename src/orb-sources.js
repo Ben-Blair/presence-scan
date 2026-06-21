@@ -1,4 +1,5 @@
 import { Vec3, Ray, Plane, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_SHIFT } from 'playcanvas';
+import { isTypingInPanel } from './dom-utils.js';
 
 const tmpRay = new Ray();
 const tmpPlane = new Plane();
@@ -118,6 +119,7 @@ export class OrbSources {
 
     /** Arrow keys move the orb on the floor plane, relative to the camera view. */
     updateKeyboard(dt) {
+        if (isTypingInPanel()) return;
         const kb = this.app.keyboard;
         const dx = (kb.isPressed(KEY_RIGHT) ? 1 : 0) - (kb.isPressed(KEY_LEFT) ? 1 : 0);
         const dz = (kb.isPressed(KEY_UP) ? 1 : 0) - (kb.isPressed(KEY_DOWN) ? 1 : 0);

@@ -41,9 +41,6 @@
       "bloomThreshold": 0.5,
       "bloomBlur": 4
     },
-    "occluder": {
-      "enabled": false
-    },
     "source": {
       "mode": "click",
       "keyboardSpeed": 2.5,

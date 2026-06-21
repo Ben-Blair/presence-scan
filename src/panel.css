@@ -1,0 +1,317 @@
+/* Garage Viewer control panel — glassy dark theme matching the app shell. */
+.cp {
+    --cp-accent: #8fd0ff;
+    --cp-accent-strong: #19a0ff;
+    --cp-fg: #e8e8f0;
+    --cp-fg-dim: rgba(232, 232, 240, 0.6);
+    --cp-bg: rgba(12, 13, 20, 0.72);
+    --cp-bg-raised: rgba(255, 255, 255, 0.04);
+    --cp-border: rgba(255, 255, 255, 0.09);
+    --cp-control-bg: rgba(255, 255, 255, 0.06);
+
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    width: 288px;
+    max-height: calc(100vh - 24px);
+    display: flex;
+    flex-direction: column;
+    z-index: 60;
+
+    color: var(--cp-fg);
+    background: var(--cp-bg);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid var(--cp-border);
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 12px;
+    user-select: none;
+    overflow: hidden;
+}
+
+.cp--hidden { display: none; }
+
+/* Header -------------------------------------------------------------- */
+.cp__header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--cp-border);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent);
+}
+.cp__title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--cp-fg);
+}
+.cp__hide {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--cp-fg-dim);
+    font-size: 20px;
+    line-height: 1;
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.cp__hide:hover { background: var(--cp-bg-raised); color: var(--cp-fg); }
+
+/* Scrollable body ----------------------------------------------------- */
+.cp__body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px 10px 12px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(143, 208, 255, 0.4) transparent;
+}
+.cp__body::-webkit-scrollbar { width: 9px; }
+.cp__body::-webkit-scrollbar-track { background: transparent; }
+.cp__body::-webkit-scrollbar-thumb {
+    background: rgba(143, 208, 255, 0.28);
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+.cp__body::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: rgba(143, 208, 255, 0.5); }
+
+/* Sections ------------------------------------------------------------ */
+.cp-sec {
+    border: 1px solid var(--cp-border);
+    border-radius: 10px;
+    background: var(--cp-bg-raised);
+    margin: 6px 0;
+    overflow: hidden;
+}
+.cp-sec .cp-sec { /* nested */
+    margin: 8px 0 2px;
+    background: rgba(0, 0, 0, 0.18);
+}
+.cp-sec__head {
+    appearance: none;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 11px;
+    background: transparent;
+    border: none;
+    color: var(--cp-fg);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease;
+}
+.cp-sec__head:hover { background: rgba(255, 255, 255, 0.04); }
+.cp-sec__chevron {
+    color: var(--cp-accent);
+    font-size: 10px;
+    transition: transform 0.18s ease;
+    transform: rotate(90deg);
+    display: inline-block;
+}
+.cp-sec--collapsed > .cp-sec__head .cp-sec__chevron { transform: rotate(0deg); }
+.cp-sec__body { padding: 4px 11px 11px; }
+.cp-sec--collapsed > .cp-sec__body { display: none; }
+
+/* Rows ---------------------------------------------------------------- */
+.cp-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 28px;
+    margin: 5px 0;
+}
+.cp-row__label {
+    flex: 0 0 40%;
+    color: var(--cp-fg-dim);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Slider -------------------------------------------------------------- */
+.cp-slider {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.cp-range {
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 4px;
+    border-radius: 3px;
+    background: var(--cp-control-bg);
+    outline: none;
+    cursor: pointer;
+}
+.cp-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--cp-accent);
+    box-shadow: 0 0 6px rgba(25, 160, 255, 0.6);
+    cursor: pointer;
+}
+.cp-range::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border: none;
+    border-radius: 50%;
+    background: var(--cp-accent);
+    cursor: pointer;
+}
+
+/* Inputs (number / text / select) ------------------------------------ */
+.cp-num, .cp-text, .cp-select {
+    appearance: none;
+    background: var(--cp-control-bg);
+    border: 1px solid var(--cp-border);
+    border-radius: 6px;
+    color: var(--cp-fg);
+    font: inherit;
+    font-size: 11px;
+    padding: 4px 6px;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.cp-num { flex: 0 0 52px; width: 52px; text-align: right; }
+.cp-text { flex: 1 1 auto; min-width: 0; }
+.cp-select { flex: 1 1 auto; min-width: 0; cursor: pointer; }
+.cp-num:focus, .cp-text:focus, .cp-select:focus {
+    border-color: var(--cp-accent-strong);
+    box-shadow: 0 0 0 2px rgba(25, 160, 255, 0.25);
+}
+.cp-select option { background: #14161f; color: var(--cp-fg); }
+/* hide number spinners */
+.cp-num::-webkit-outer-spin-button, .cp-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.cp-num { -moz-appearance: textfield; }
+
+/* Color --------------------------------------------------------------- */
+.cp-color {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--cp-border);
+    border-radius: 6px;
+    background: var(--cp-control-bg);
+    cursor: pointer;
+}
+.cp-color::-webkit-color-swatch-wrapper { padding: 3px; }
+.cp-color::-webkit-color-swatch { border: none; border-radius: 4px; }
+
+/* Toggle switch ------------------------------------------------------- */
+.cp-switch {
+    flex: 0 0 auto;
+    margin-left: auto;
+    position: relative;
+    display: inline-block;
+    width: 38px;
+    height: 21px;
+    cursor: pointer;
+}
+.cp-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.cp-switch__track {
+    position: absolute;
+    inset: 0;
+    border-radius: 11px;
+    background: var(--cp-control-bg);
+    border: 1px solid var(--cp-border);
+    transition: background 0.18s ease;
+}
+.cp-switch__track::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--cp-fg-dim);
+    transition: transform 0.18s ease, background 0.18s ease;
+}
+.cp-switch input:checked + .cp-switch__track {
+    background: rgba(25, 160, 255, 0.45);
+    border-color: var(--cp-accent-strong);
+}
+.cp-switch input:checked + .cp-switch__track::before {
+    transform: translateX(17px);
+    background: var(--cp-accent);
+}
+
+/* Button -------------------------------------------------------------- */
+.cp-btn {
+    appearance: none;
+    display: block;
+    width: 100%;
+    margin: 6px 0;
+    padding: 8px 10px;
+    border: 1px solid var(--cp-border);
+    border-radius: 8px;
+    background: var(--cp-control-bg);
+    color: var(--cp-fg);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+}
+.cp-btn:hover { background: rgba(25, 160, 255, 0.16); border-color: var(--cp-accent-strong); }
+.cp-btn:active { transform: translateY(1px); }
+
+/* Readout ------------------------------------------------------------- */
+.cp-readout {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: right;
+    color: var(--cp-accent);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Floating reopen button --------------------------------------------- */
+.cp-fab {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    z-index: 60;
+    width: 42px;
+    height: 42px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    color: var(--cp-accent, #8fd0ff);
+    background: rgba(12, 13, 20, 0.72);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease;
+}
+.cp-fab--show { display: flex; }
+.cp-fab:hover { background: rgba(25, 160, 255, 0.2); }
+.cp-fab:active { transform: scale(0.94); }
