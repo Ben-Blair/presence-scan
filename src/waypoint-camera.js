@@ -41,6 +41,7 @@ export class WaypointCamera {
         this._camPos = new Vec3();
         this._lookTarget = new Vec3();
         this._railS = 0;             // current cyclic rail parameter in [0, N)
+        this._fleeK = -1;            // order-index of the anchor we're fleeing to, or -1
     }
 
     get _cfg() { return this.params.camera.waypoint; }
@@ -98,6 +99,28 @@ export class WaypointCamera {
         return { s: bestS, radius: Math.sqrt(rx * rx + rz * rz) };
     }
 
+    /**
+     * Among anchors, pick the rail-loop index whose eye keeps a similar bearing to
+     * the orb as the current camera (so fleeing doesn't flip the shot to the
+     * opposite side of the room), preferring ones far enough from the orb.
+     */
+    _pickFleeAnchor(order, orbPos) {
+        const anchors = this._anchors;
+        const curAngle = Math.atan2(this._camPos.z - orbPos.z, this._camPos.x - orbPos.x);
+        let bestK = 0, bestScore = -Infinity;
+        for (let k = 0; k < order.length; k++) {
+            const eye = anchors[order[k]].eye;
+            const dx = eye.x - orbPos.x, dz = eye.z - orbPos.z;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            let diff = Math.abs(Math.atan2(dz, dx) - curAngle);
+            if (diff > Math.PI) diff = 2 * Math.PI - diff;
+            const safe = dist >= this._cfg.minOrbDistance ? 1 : 0;
+            const score = safe * 10 + Math.cos(diff);
+            if (score > bestScore) { bestScore = score; bestK = k; }
+        }
+        return bestK;
+    }
+
     /** Eye position at rail parameter s, with the park curve applied to the fraction. */
     _evalRail(order, s) {
         const anchors = this._anchors;
@@ -149,6 +172,8 @@ export class WaypointCamera {
         this._camPos.copy(this.camera.getPosition());
         this._lookTarget.copy(this.orb.getPosition());
 
+        this._fleeK = -1;
+
         if (this._anchors.length > 0) {
             // seed the rail parameter at the orb's current spot; _camPos eases in
             // from the manual pose to the rail point over the next frames
@@ -182,14 +207,40 @@ export class WaypointCamera {
         const n = order.length;
 
         // ---- 1. PROJECT ORB ONTO THE CONTROL LOOP -> rail target ---------
-        const { s: sTarget, radius } = this._projectToControlLoop(order, orbPos);
+        const proj = this._projectToControlLoop(order, orbPos);
+
+        // Decide whether the shot is too tight using the orb's distance to the
+        // eye the camera would *naturally* ride to — NOT the current camera
+        // position. Keying the latch off the live camera position creates a
+        // feedback loop: fleeing pushes the camera away, which satisfies the
+        // release test, which lets the projection pull it straight back onto the
+        // orb, which re-triggers the flee — an endless in/out pump. The natural
+        // eye depends only on the orb, so the latch settles.
+        const naturalDist = orbPos.distance(this._evalRail(order, proj.s));
+
+        // If the natural shot would be too tight, peel off toward a different
+        // anchor with a similar view angle; stay latched there (with hysteresis)
+        // until the orb gives the natural shot room again.
+        if (this._fleeK < 0 && naturalDist < cfg.minOrbDistance) {
+            this._fleeK = this._pickFleeAnchor(order, orbPos);
+        } else if (this._fleeK >= 0 && naturalDist > cfg.minOrbDistance * 1.5) {
+            this._fleeK = -1;
+        }
+
+        let sTarget, radiusGate;
+        if (this._fleeK >= 0) {
+            sTarget = this._fleeK;
+            radiusGate = 1; // move promptly, ignore the center deadzone while fleeing
+        } else {
+            sTarget = proj.s;
+            const r0 = Math.max(this.roomBounds.halfExtents.x, this.roomBounds.halfExtents.z) * cfg.deadzoneFrac;
+            radiusGate = math.clamp(proj.radius / Math.max(r0, 0.001), 0, 1);
+        }
 
         // ---- 2. RIDE THE RAIL --------------------------------------------
         // ease s along the loop toward the target; gate the rate by the orb's
         // radius from center so noise near the middle (where the projection is
         // ill-conditioned) doesn't spin the rail.
-        const r0 = Math.max(this.roomBounds.halfExtents.x, this.roomBounds.halfExtents.z) * cfg.deadzoneFrac;
-        const radiusGate = math.clamp(radius / Math.max(r0, 0.001), 0, 1);
         const sT = (1 - Math.exp(-cfg.railSmoothing * dt)) * radiusGate;
         this._railS = this._easeCyclic(this._railS, sTarget, sT, n);
 
