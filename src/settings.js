@@ -60,6 +60,8 @@ export function createSettingsPanel(params, hooks) {
     way.addSlider(params.camera.waypoint, 'railSmoothing', { min: 0.5, max: 8, step: 0.1, label: 'rail follow speed', onChange: onCam });
     way.addSlider(params.camera.waypoint, 'parkBias', { min: 0, max: 1, step: 0.05, label: 'stick at corners', onChange: onCam });
     way.addSlider(params.camera.waypoint, 'lookSmoothing', { min: 0.5, max: 12, step: 0.5, label: 'aim speed', onChange: onCam });
+    way.addSlider(params.camera.waypoint, 'heightOffset', { min: -2, max: 2, step: 0.05, label: 'viewing height offset (m)', onChange: onCam });
+    way.addSlider(params.camera.waypoint, 'deadzoneFrac', { min: 0.05, max: 1, step: 0.05, label: 'center deadzone', onChange: onCam });
 
     // Set each zone's camera position by hand: turn anchor follow off, fly the
     // camera to a good vantage, then click (or press the zone number key).
