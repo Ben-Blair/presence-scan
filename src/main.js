@@ -28,6 +28,7 @@ import { Orb } from './orb.js';
 import { SplatFX } from './splat-effects.js';
 import { OrbSources } from './orb-sources.js';
 import { WaypointCamera } from './waypoint-camera.js';
+import { SensorMinimap } from './sensor-minimap.js';
 import { createSettingsPanel } from './settings.js';
 import { isTypingInPanel } from './dom-utils.js';
 
@@ -127,8 +128,14 @@ function buildScene() {
     // anchors (persisted via the settings store in params.camera.anchors)
     // override these.
     if (params.camera.anchors.length === 0) {
-        const ceilingY = center.y + halfExtents.y - 0.3;
-        const inset = 0.4; // keep the camera off the corner walls a touch
+        // Pull the corner eyes well clear of the wall/ceiling splat shell —
+        // splats have thickness and fuzz, so a small fixed inset (0.3-0.4m)
+        // leaves the camera embedded in the geometry. Scale the inset to the
+        // room and drop it a solid amount below the ceiling, while keeping the
+        // high, diagonally-opposite vantage for the oblique across-room angle.
+        const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+        const ceilingY = center.y + halfExtents.y - clamp(halfExtents.y * 0.3, 0.7, 1.2);
+        const inset = clamp(Math.min(halfExtents.x, halfExtents.z) * 0.2, 0.8, 1.5);
         const minX = center.x - halfExtents.x;
         const maxX = center.x + halfExtents.x;
         const minZ = center.z - halfExtents.z;
@@ -246,6 +253,13 @@ function buildScene() {
         console.info(`Captured camera position for zone "${anchor.name}".`);
     };
 
+    // ---------------------------------------------------------- sensor minimap
+    // Bottom-left radar plot of the live mmWave stream (LD2450-app style) so
+    // you can confirm the sensor sees you and tracks accurately. Visible only
+    // while the orb source is the sensor.
+    const minimap = new SensorMinimap(sources, params);
+    minimap.mount();
+
     // ---------------------------------------------------------- settings
     const hooks = {
         sources,
@@ -305,7 +319,7 @@ function buildScene() {
     });
 
     // debug handle for console inspection
-    window.__viewer = { app, splat, camera, controls, orb, sources, autoCam, center, halfExtents, params };
+    window.__viewer = { app, splat, camera, controls, orb, sources, autoCam, minimap, center, halfExtents, params };
 
     // ---------------------------------------------------------- per-frame
     const roomBox = new BoundingBox(center.clone(), halfExtents.clone());
@@ -330,10 +344,13 @@ function buildScene() {
         const orbPos = orb.getPosition();
         const camPos = camera.getPosition();
 
-        // cutaway state
+        // cutaway state. While anchor follow drives the camera we want a solid
+        // interior view, so auto-cutaway is suppressed (it would peel the walls
+        // and make the room look like a see-through box from outside).
         const outside = !roomBox.containsPoint(camPos);
-        const cutOn = params.cutaway.mode === 'on' ||
-            (params.cutaway.mode === 'auto' && outside);
+        const cutOn = !autoCam.active && (
+            params.cutaway.mode === 'on' ||
+            (params.cutaway.mode === 'auto' && outside));
 
         // push shader uniforms (quantized; only re-renders splat when changed)
         splatFX.setParams([

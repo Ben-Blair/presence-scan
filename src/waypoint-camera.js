@@ -117,6 +117,20 @@ export class WaypointCamera {
         );
     }
 
+    /**
+     * Clamp a camera eye to stay inside the room bounds (inset by `margin`), so
+     * the follow camera never pokes through a wall — which would both show the
+     * exterior and trip the auto-cutaway wall-peel. Mutates and returns `v`.
+     */
+    _clampToRoom(v, margin) {
+        const c = this.roomBounds.center;
+        const he = this.roomBounds.halfExtents;
+        v.x = math.clamp(v.x, c.x - he.x + margin, c.x + he.x - margin);
+        v.z = math.clamp(v.z, c.z - he.z + margin, c.z + he.z - margin);
+        v.y = Math.min(v.y, c.y + he.y - margin);
+        return v;
+    }
+
     /** Ease `cur` toward `target` along the shorter arc of a length-N ring. */
     _easeCyclic(cur, target, t, n) {
         let diff = (target - cur) % n;
@@ -179,9 +193,10 @@ export class WaypointCamera {
         const sT = (1 - Math.exp(-cfg.railSmoothing * dt)) * radiusGate;
         this._railS = this._easeCyclic(this._railS, sTarget, sT, n);
 
-        // glide the camera toward the rail point
+        // glide the camera toward the rail point, kept inside the walls
         const posT = 1 - Math.exp(-cfg.railSmoothing * dt);
-        this._camPos.lerp(this._camPos, this._evalRail(order, this._railS), posT);
+        const railPoint = this._clampToRoom(this._evalRail(order, this._railS), 0.25);
+        this._camPos.lerp(this._camPos, railPoint, posT);
 
         // ---- 3. ACTIVE TARGET LOCK (every frame) -------------------------
         const lookT = 1 - Math.exp(-cfg.lookSmoothing * dt);

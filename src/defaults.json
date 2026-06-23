@@ -51,7 +51,8 @@
         "originX": 0,
         "originZ": 0,
         "rotationDeg": 0,
-        "scale": 0.001
+        "scale": 0.001,
+        "flipSensorY": false
       }
     }
   }

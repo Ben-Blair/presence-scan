@@ -33,29 +33,33 @@ export class OrbSources {
         this.demoTime = 0;
         this.socket = null;
         this.sensorStatus = 'disconnected';
+        // latest raw sensor reading {x, y, t} for the minimap diagnostic view
+        this.lastSample = null;
 
         const canvas = app.graphicsDevice.canvas;
         canvas.addEventListener('dblclick', (e) => this.onDoubleClick(e));
     }
 
-    onDoubleClick(e) {
-        if (this.params.source.mode !== 'click') return;
-
+    /**
+     * Cast a screen-space click through the camera onto a horizontal plane and
+     * return the world-space hit (or null). Defaults to the floor (y = floorY).
+     */
+    pickFloorPoint(clientX, clientY, planeY = this.params.source.floorY) {
         const cam = this.camera.camera;
         const rect = this.app.graphicsDevice.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
-        cam.screenToWorld(x, y, cam.farClip, tmpFar);
+        cam.screenToWorld(clientX - rect.left, clientY - rect.top, cam.farClip, tmpFar);
         const origin = this.camera.getPosition();
         tmpRay.set(origin, tmpFar.sub(origin).normalize());
-
-        // intersect with the orb travel plane (floor + orb height)
-        const planeY = this.params.source.floorY + this.params.orb.height;
         tmpPlane.setFromPointNormal(new Vec3(0, planeY, 0), Vec3.UP);
-        if (tmpPlane.intersectsRay(tmpRay, tmpHit)) {
-            this.orb.setTarget(tmpHit);
-        }
+        return tmpPlane.intersectsRay(tmpRay, tmpHit) ? tmpHit.clone() : null;
+    }
+
+    onDoubleClick(e) {
+        if (this.params.source.mode !== 'click') return;
+        // intersect with the orb travel plane (floor + orb height)
+        const hit = this.pickFloorPoint(e.clientX, e.clientY,
+            this.params.source.floorY + this.params.orb.height);
+        if (hit) this.orb.setTarget(hit);
     }
 
     connectSensor() {
@@ -71,6 +75,7 @@ export class OrbSources {
                 try {
                     const data = JSON.parse(msg.data);
                     if (typeof data.x === 'number' && typeof data.y === 'number') {
+                        this.lastSample = { x: data.x, y: data.y, t: performance.now() };
                         this.orb.setTarget(this.sensorToWorld(data.x, data.y));
                     }
                 } catch {
@@ -93,9 +98,10 @@ export class OrbSources {
     /** Map sensor-space (mm, sensor at origin) to world space via calibration. */
     sensorToWorld(sx, sy) {
         const s = this.params.source.sensor;
+        const syf = s.flipSensorY ? -sy : sy; // mirror lateral axis if calibrated so
         const rad = (s.rotationDeg * Math.PI) / 180;
         const mx = sx * s.scale;
-        const mz = sy * s.scale;
+        const mz = syf * s.scale;
         const wx = s.originX + mx * Math.cos(rad) - mz * Math.sin(rad);
         const wz = s.originZ + mx * Math.sin(rad) + mz * Math.cos(rad);
         const wy = this.params.source.floorY + this.params.orb.height;

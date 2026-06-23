@@ -8,7 +8,7 @@ import { createPanel } from './panel-controls.js';
  * @param {*} hooks - callbacks: onOrbChanged(), onCameraChanged(),
  *                    onSourceModeChanged(), connectSensor(), disconnectSensor(), frameOrb(),
  *                    captureAnchor(i), saveSession(), resetToDefaults(),
- *                    and sources (for sensor status readout)
+ *                    and sources (for the sensor status readout)
  * @returns {{ element: HTMLElement, refresh: () => void, toggle: () => void }}
  */
 export function createSettingsPanel(params, hooks) {
@@ -90,6 +90,7 @@ export function createSettingsPanel(params, hooks) {
     sensor.addSlider(params.source.sensor, 'originZ', { min: -20, max: 20, step: 0.05, label: 'originZ' });
     sensor.addSlider(params.source.sensor, 'rotationDeg', { min: -180, max: 180, step: 1, label: 'rotationDeg' });
     sensor.addSlider(params.source.sensor, 'scale', { min: 0.0001, max: 0.01, step: 0.0001, label: 'scale', format: (v) => v.toFixed(4) });
+    sensor.addToggle(params.source.sensor, 'flipSensorY', { label: 'mirror Y' });
     sensor.addButton({ title: 'Connect', onClick: () => hooks.connectSensor() });
     sensor.addButton({ title: 'Disconnect', onClick: () => hooks.disconnectSensor() });
     sensor.addReadout({ label: 'status', get: () => hooks.sources.sensorStatus });

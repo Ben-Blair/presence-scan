@@ -315,3 +315,26 @@
 .cp-fab--show { display: flex; }
 .cp-fab:hover { background: rgba(25, 160, 255, 0.2); }
 .cp-fab:active { transform: scale(0.94); }
+
+/* Sensor minimap (live mmWave radar plot) ---------------------------- */
+/* Diagnostic radar view in the bottom-left corner, styled after the
+   HLK-LD2450 app. Non-interactive so it never blocks camera drags; shown only
+   while the orb source is the sensor (toggled from sensor-minimap.js). */
+.radar-minimap {
+    position: fixed;
+    left: 12px;
+    bottom: 12px;
+    z-index: 55;
+    display: none;
+    padding: 8px;
+    background: rgba(10, 10, 18, 0.62);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    pointer-events: none;
+    user-select: none;
+}
+.radar-minimap--on { display: block; }
+.radar-minimap canvas { display: block; }
