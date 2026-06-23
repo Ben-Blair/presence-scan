@@ -27,7 +27,8 @@
         "lookSmoothing": 4.0,
         "parkBias": 0.6,
         "heightOffset": 0,
-        "deadzoneFrac": 0.25
+        "deadzoneFrac": 0.25,
+        "minOrbDistance": 1.0
       },
       "anchors": []
     },
