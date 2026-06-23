@@ -112,7 +112,7 @@ export class WaypointCamera {
         const eb = anchors[order[(k + 1) % n]].eye;
         return tmpV1.set(
             math.lerp(ea.x, eb.x, frac),
-            math.lerp(ea.y, eb.y, frac),
+            math.lerp(ea.y, eb.y, frac) + this._cfg.heightOffset,
             math.lerp(ea.z, eb.z, frac)
         );
     }
@@ -188,7 +188,7 @@ export class WaypointCamera {
         // ease s along the loop toward the target; gate the rate by the orb's
         // radius from center so noise near the middle (where the projection is
         // ill-conditioned) doesn't spin the rail.
-        const r0 = Math.max(this.roomBounds.halfExtents.x, this.roomBounds.halfExtents.z) * 0.25;
+        const r0 = Math.max(this.roomBounds.halfExtents.x, this.roomBounds.halfExtents.z) * cfg.deadzoneFrac;
         const radiusGate = math.clamp(radius / Math.max(r0, 0.001), 0, 1);
         const sT = (1 - Math.exp(-cfg.railSmoothing * dt)) * radiusGate;
         this._railS = this._easeCyclic(this._railS, sTarget, sT, n);
