@@ -99,19 +99,9 @@ function buildScene() {
     // rendered.
     const collisionMesh = assets.collision.resource.instantiateRenderEntity();
     app.root.addChild(collisionMesh);
-    const worldAabb = new BoundingBox();
-    let aabbInit = false;
-    collisionMesh.findComponents('render').forEach((render) => {
-        render.meshInstances.forEach((mi) => {
-            if (!aabbInit) {
-                worldAabb.copy(mi.aabb);
-                aabbInit = true;
-            } else {
-                worldAabb.add(mi.aabb);
-            }
-        });
-    });
-    if (!aabbInit) {
+    let worldAabb = deriveRoomBounds(collisionMesh);
+    if (!worldAabb) {
+        worldAabb = new BoundingBox();
         worldAabb.setFromTransformedAabb(assets.garage.resource.aabb, splat.getWorldTransform());
     }
     collisionMesh.destroy();
@@ -119,44 +109,12 @@ function buildScene() {
     const halfExtents = worldAabb.halfExtents.clone();
     params.source.floorY = worldAabb.getMin().y + 0.05;
 
+    // ---------------------------------------------------------- anchors
     // Auto-derive default zones from the runtime room bounds when none are
-    // configured. The splat's world coordinates aren't known until load, so
-    // hand-hardcoding boxes up front is impractical. This partitions the floor
-    // into four quadrants and mounts each quadrant's camera high in the
-    // diagonally-opposite room corner, so it looks *across* the room at an
-    // oblique security-camera angle rather than straight down. Captured/edited
-    // anchors (persisted via the settings store in params.camera.anchors)
-    // override these.
+    // configured. Captured/edited anchors (persisted via the settings store in
+    // params.camera.anchors) override these.
     if (params.camera.anchors.length === 0) {
-        // Pull the corner eyes well clear of the wall/ceiling splat shell —
-        // splats have thickness and fuzz, so a small fixed inset (0.3-0.4m)
-        // leaves the camera embedded in the geometry. Scale the inset to the
-        // room and drop it a solid amount below the ceiling, while keeping the
-        // high, diagonally-opposite vantage for the oblique across-room angle.
-        const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
-        const ceilingY = center.y + halfExtents.y - clamp(halfExtents.y * 0.3, 0.7, 1.2);
-        const inset = clamp(Math.min(halfExtents.x, halfExtents.z) * 0.2, 0.8, 1.5);
-        const minX = center.x - halfExtents.x;
-        const maxX = center.x + halfExtents.x;
-        const minZ = center.z - halfExtents.z;
-        const maxZ = center.z + halfExtents.z;
-
-        // each zone: floor quadrant box + the opposite corner it's viewed from
-        const zones = [
-            { name: 'NW', box: { minX, minZ, maxX: center.x, maxZ: center.z }, corner: { x: maxX, z: maxZ } },
-            { name: 'NE', box: { minX: center.x, minZ, maxX, maxZ: center.z }, corner: { x: minX, z: maxZ } },
-            { name: 'SW', box: { minX, minZ: center.z, maxX: center.x, maxZ }, corner: { x: maxX, z: minZ } },
-            { name: 'SE', box: { minX: center.x, minZ: center.z, maxX, maxZ }, corner: { x: minX, z: minZ } }
-        ];
-        for (const z of zones) {
-            // inset the corner toward room center so the camera sits just inside
-            const eye = {
-                x: z.corner.x + Math.sign(center.x - z.corner.x) * inset,
-                y: ceilingY,
-                z: z.corner.z + Math.sign(center.z - z.corner.z) * inset
-            };
-            params.camera.anchors.push({ name: z.name, box: z.box, eye });
-        }
+        params.camera.anchors.push(...generateDefaultAnchors(center, halfExtents));
     }
 
     // ---------------------------------------------------------- camera
@@ -296,27 +254,7 @@ function buildScene() {
     const pane = createSettingsPanel(params, hooks);
 
     // ---------------------------------------------------------- hotkeys
-    app.keyboard.on(EVENT_KEYDOWN, (e) => {
-        if (isTypingInPanel()) return;
-        if (e.key === KEY_P) {
-            pane.toggle();
-        } else if (e.key === KEY_F) {
-            controls.focus(orb.getPosition());
-        } else if (e.key === KEY_O) {
-            params.camera.orbitOrb = !params.camera.orbitOrb;
-            pane.refresh();
-        } else if (e.key === KEY_H) {
-            saveCurrentSession();
-        } else if (e.key === KEY_1) {
-            captureAnchor(0);
-        } else if (e.key === KEY_2) {
-            captureAnchor(1);
-        } else if (e.key === KEY_3) {
-            captureAnchor(2);
-        } else if (e.key === KEY_4) {
-            captureAnchor(3);
-        }
-    });
+    wireHotkeys({ pane, controls, orb, captureAnchor, saveCurrentSession });
 
     // debug handle for console inspection
     window.__viewer = { app, splat, camera, controls, orb, sources, autoCam, minimap, center, halfExtents, params };
@@ -353,20 +291,113 @@ function buildScene() {
             (params.cutaway.mode === 'auto' && outside));
 
         // push shader uniforms (quantized; only re-renders splat when changed)
-        splatFX.setParams([
-            round(orbPos.x, 0.01), round(orbPos.y, 0.01), round(orbPos.z, 0.01),
-            params.orb.color.r, params.orb.color.g, params.orb.color.b,
-            params.orb.glowIntensity, params.orb.glowRadius,
-            cutOn ? 1 : 0,
-            cutOn ? round(camPos.x, 0.03) : 0,
-            cutOn ? round(camPos.y, 0.03) : 0,
-            cutOn ? round(camPos.z, 0.03) : 0,
-            cutOn ? round(orbPos.x, 0.03) : 0,
-            cutOn ? round(orbPos.y, 0.03) : 0,
-            cutOn ? round(orbPos.z, 0.03) : 0,
-            params.cutaway.distance, params.cutaway.softness,
-            round(camPos.x, 0.01), round(camPos.y, 0.01), round(camPos.z, 0.01),
-            params.orb.glowFacing
-        ]);
+        splatFX.setParams({
+            orbPos: [round(orbPos.x, 0.01), round(orbPos.y, 0.01), round(orbPos.z, 0.01)],
+            orbColor: [params.orb.color.r, params.orb.color.g, params.orb.color.b],
+            orbIntensity: params.orb.glowIntensity,
+            orbRadius: params.orb.glowRadius,
+            cutEnabled: cutOn ? 1 : 0,
+            cutCamPos: [
+                cutOn ? round(camPos.x, 0.03) : 0,
+                cutOn ? round(camPos.y, 0.03) : 0,
+                cutOn ? round(camPos.z, 0.03) : 0
+            ],
+            cutFocusPos: [
+                cutOn ? round(orbPos.x, 0.03) : 0,
+                cutOn ? round(orbPos.y, 0.03) : 0,
+                cutOn ? round(orbPos.z, 0.03) : 0
+            ],
+            cutDist: params.cutaway.distance,
+            cutSoft: params.cutaway.softness,
+            viewPos: [round(camPos.x, 0.01), round(camPos.y, 0.01), round(camPos.z, 0.01)],
+            glowFacing: params.orb.glowFacing
+        });
+    });
+}
+
+/**
+ * Measure the true room bounds from the collision mesh's render instances.
+ * Returns the world-space AABB, or null if the mesh has no renderables (the
+ * caller then falls back to the splat AABB).
+ */
+function deriveRoomBounds(collisionMesh) {
+    const worldAabb = new BoundingBox();
+    let aabbInit = false;
+    collisionMesh.findComponents('render').forEach((render) => {
+        render.meshInstances.forEach((mi) => {
+            if (!aabbInit) {
+                worldAabb.copy(mi.aabb);
+                aabbInit = true;
+            } else {
+                worldAabb.add(mi.aabb);
+            }
+        });
+    });
+    return aabbInit ? worldAabb : null;
+}
+
+/**
+ * Build four default anchor zones from the runtime room bounds. The splat's
+ * world coordinates aren't known until load, so hand-hardcoding boxes up front
+ * is impractical. This partitions the floor into four quadrants and mounts each
+ * quadrant's camera high in the diagonally-opposite room corner, so it looks
+ * *across* the room at an oblique security-camera angle rather than straight
+ * down.
+ */
+function generateDefaultAnchors(center, halfExtents) {
+    // Pull the corner eyes well clear of the wall/ceiling splat shell — splats
+    // have thickness and fuzz, so a small fixed inset (0.3-0.4m) leaves the
+    // camera embedded in the geometry. Scale the inset to the room and drop it a
+    // solid amount below the ceiling, while keeping the high, diagonally-opposite
+    // vantage for the oblique across-room angle.
+    const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+    const ceilingY = center.y + halfExtents.y - clamp(halfExtents.y * 0.3, 0.7, 1.2);
+    const inset = clamp(Math.min(halfExtents.x, halfExtents.z) * 0.2, 0.8, 1.5);
+    const minX = center.x - halfExtents.x;
+    const maxX = center.x + halfExtents.x;
+    const minZ = center.z - halfExtents.z;
+    const maxZ = center.z + halfExtents.z;
+
+    // each zone: floor quadrant box + the opposite corner it's viewed from
+    const zones = [
+        { name: 'NW', box: { minX, minZ, maxX: center.x, maxZ: center.z }, corner: { x: maxX, z: maxZ } },
+        { name: 'NE', box: { minX: center.x, minZ, maxX, maxZ: center.z }, corner: { x: minX, z: maxZ } },
+        { name: 'SW', box: { minX, minZ: center.z, maxX: center.x, maxZ }, corner: { x: maxX, z: minZ } },
+        { name: 'SE', box: { minX: center.x, minZ: center.z, maxX, maxZ }, corner: { x: minX, z: minZ } }
+    ];
+    return zones.map((z) => ({
+        name: z.name,
+        box: z.box,
+        // inset the corner toward room center so the camera sits just inside
+        eye: {
+            x: z.corner.x + Math.sign(center.x - z.corner.x) * inset,
+            y: ceilingY,
+            z: z.corner.z + Math.sign(center.z - z.corner.z) * inset
+        }
+    }));
+}
+
+/** Wire the global keyboard shortcuts. */
+function wireHotkeys({ pane, controls, orb, captureAnchor, saveCurrentSession }) {
+    app.keyboard.on(EVENT_KEYDOWN, (e) => {
+        if (isTypingInPanel()) return;
+        if (e.key === KEY_P) {
+            pane.toggle();
+        } else if (e.key === KEY_F) {
+            controls.focus(orb.getPosition());
+        } else if (e.key === KEY_O) {
+            params.camera.orbitOrb = !params.camera.orbitOrb;
+            pane.refresh();
+        } else if (e.key === KEY_H) {
+            saveCurrentSession();
+        } else if (e.key === KEY_1) {
+            captureAnchor(0);
+        } else if (e.key === KEY_2) {
+            captureAnchor(1);
+        } else if (e.key === KEY_3) {
+            captureAnchor(2);
+        } else if (e.key === KEY_4) {
+            captureAnchor(3);
+        }
     });
 }

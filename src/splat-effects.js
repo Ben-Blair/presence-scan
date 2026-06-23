@@ -197,27 +197,44 @@ export class SplatFX {
     }
 
     /**
-     * Push uniforms. Setting parameters on the gsplat component marks the
-     * placement render-dirty (re-copies the workbuffer + resorts), so this is
-     * only called when values actually changed.
+     * Push uniforms from a named-field object. Setting parameters on the gsplat
+     * component marks the placement render-dirty (re-copies the workbuffer +
+     * resorts), so this short-circuits when nothing changed.
+     *
+     * @param {object} p
+     * @param {number[]} p.orbPos        - world-space orb position [x,y,z]
+     * @param {number[]} p.orbColor      - orb glow color [r,g,b]
+     * @param {number}   p.orbIntensity  - glow intensity
+     * @param {number}   p.orbRadius     - glow radius
+     * @param {number}   p.cutEnabled    - 1/0 cutaway toggle
+     * @param {number[]} p.cutCamPos     - cutaway camera position [x,y,z]
+     * @param {number[]} p.cutFocusPos   - cutaway focus position [x,y,z]
+     * @param {number}   p.cutDist       - cutaway keep distance
+     * @param {number}   p.cutSoft       - cutaway softness
+     * @param {number[]} p.viewPos       - view position for normal-facing test [x,y,z]
+     * @param {number}   p.glowFacing    - surface-facing glow weight
      */
     setParams(p) {
-        const key = p.join(',');
+        const key = [
+            ...p.orbPos, ...p.orbColor, p.orbIntensity, p.orbRadius,
+            p.cutEnabled, ...p.cutCamPos, ...p.cutFocusPos, p.cutDist, p.cutSoft,
+            ...p.viewPos, p.glowFacing
+        ].join(',');
         if (key === this._last) return false;
         this._last = key;
 
         const g = this.splatEntity.gsplat;
-        g.setParameter('uOrbPos', [p[0], p[1], p[2]]);
-        g.setParameter('uOrbColor', [p[3], p[4], p[5]]);
-        g.setParameter('uOrbIntensity', p[6]);
-        g.setParameter('uOrbRadius', p[7]);
-        g.setParameter('uCutEnabled', p[8]);
-        g.setParameter('uCutCamPos', [p[9], p[10], p[11]]);
-        g.setParameter('uCutFocusPos', [p[12], p[13], p[14]]);
-        g.setParameter('uCutDist', p[15]);
-        g.setParameter('uCutSoft', p[16]);
-        g.setParameter('uViewPos', [p[17], p[18], p[19]]);
-        g.setParameter('uGlowFacing', p[20]);
+        g.setParameter('uOrbPos', p.orbPos);
+        g.setParameter('uOrbColor', p.orbColor);
+        g.setParameter('uOrbIntensity', p.orbIntensity);
+        g.setParameter('uOrbRadius', p.orbRadius);
+        g.setParameter('uCutEnabled', p.cutEnabled);
+        g.setParameter('uCutCamPos', p.cutCamPos);
+        g.setParameter('uCutFocusPos', p.cutFocusPos);
+        g.setParameter('uCutDist', p.cutDist);
+        g.setParameter('uCutSoft', p.cutSoft);
+        g.setParameter('uViewPos', p.viewPos);
+        g.setParameter('uGlowFacing', p.glowFacing);
         return true;
     }
 }
