@@ -21,6 +21,17 @@ console.log(`WebSocket bridge listening on ws://localhost:${PORT}`);
 let lastX = null;
 let lastY = null;
 
+// Don't dial the ESPHome device until the viewer actually wants sensor data
+// (it opens a WS connection when the "Connect" button in the sensor panel
+// is pressed) - otherwise this spams ENOTFOUND/retry every 3s whenever the
+// sensor is unplugged, even if nobody asked for it.
+let sseStarted = false;
+wss.on('connection', () => {
+    if (sseStarted) return;
+    sseStarted = true;
+    run();
+});
+
 function broadcast(x, y) {
     const payload = JSON.stringify({ x, y });
     for (const client of wss.clients) {
@@ -90,5 +101,3 @@ async function run() {
         await new Promise((r) => setTimeout(r, 3000));
     }
 }
-
-run();
