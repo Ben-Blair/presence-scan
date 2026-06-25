@@ -34,9 +34,13 @@
     },
     "cutaway": {
       "mode": "auto",
-      "distance": 2.5,
+      "wallPeels": {
+        "xPos": 0.5, "xNeg": 0.5,
+        "yPos": 0.5, "yNeg": 0.5,
+        "zPos": 0.5, "zNeg": 0.5
+      },
       "softness": 1.2,
-      "wallCut": 1.5
+      "engage": 0.5
     },
     "splat": {
       "brightness": 1.0,
@@ -55,7 +59,9 @@
         "originZ": 0,
         "rotationDeg": 0,
         "scale": 0.001,
-        "flipSensorY": false
+        "flipSensorY": false,
+        "showOverlay": true,
+        "mountHeight": 1.6
       }
     }
   }

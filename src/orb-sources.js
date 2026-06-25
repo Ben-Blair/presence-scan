@@ -9,6 +9,8 @@ const tmpForward = new Vec3();
 const tmpRight = new Vec3();
 const tmpMove = new Vec3();
 const tmpOrbPos = new Vec3();
+const tmpSensorWorld = new Vec3();
+const tmpPlaneOrigin = new Vec3();
 
 /**
  * Decides where the orb should be. Three sources:
@@ -33,6 +35,7 @@ export class OrbSources {
         this.demoTime = 0;
         this.socket = null;
         this.sensorStatus = 'disconnected';
+        this.onStatusChange = null;
         // latest raw sensor reading {x, y, t} for the minimap diagnostic view
         this.lastSample = null;
 
@@ -50,8 +53,8 @@ export class OrbSources {
         cam.screenToWorld(clientX - rect.left, clientY - rect.top, cam.farClip, tmpFar);
         const origin = this.camera.getPosition();
         tmpRay.set(origin, tmpFar.sub(origin).normalize());
-        tmpPlane.setFromPointNormal(new Vec3(0, planeY, 0), Vec3.UP);
-        return tmpPlane.intersectsRay(tmpRay, tmpHit) ? tmpHit.clone() : null;
+        tmpPlane.setFromPointNormal(tmpPlaneOrigin.set(0, planeY, 0), Vec3.UP);
+        return tmpPlane.intersectsRay(tmpRay, tmpHit) ? tmpHit : null;
     }
 
     onDoubleClick(e) {
@@ -68,9 +71,19 @@ export class OrbSources {
         try {
             this.socket = new WebSocket(url);
             this.sensorStatus = 'connecting…';
-            this.socket.onopen = () => (this.sensorStatus = 'connected');
-            this.socket.onclose = () => (this.sensorStatus = 'disconnected');
-            this.socket.onerror = () => (this.sensorStatus = 'error');
+            this.onStatusChange?.();
+            this.socket.onopen = () => {
+                this.sensorStatus = 'connected';
+                this.onStatusChange?.();
+            };
+            this.socket.onclose = () => {
+                this.sensorStatus = 'disconnected';
+                this.onStatusChange?.();
+            };
+            this.socket.onerror = () => {
+                this.sensorStatus = 'error';
+                this.onStatusChange?.();
+            };
             this.socket.onmessage = (msg) => {
                 try {
                     const data = JSON.parse(msg.data);
@@ -93,6 +106,7 @@ export class OrbSources {
             this.socket = null;
         }
         this.sensorStatus = 'disconnected';
+        this.onStatusChange?.();
     }
 
     /** Map sensor-space (mm, sensor at origin) to world space via calibration. */
@@ -105,7 +119,7 @@ export class OrbSources {
         const wx = s.originX + mx * Math.cos(rad) - mz * Math.sin(rad);
         const wz = s.originZ + mx * Math.sin(rad) + mz * Math.cos(rad);
         const wy = this.params.source.floorY + this.params.orb.height;
-        return new Vec3(wx, wy, wz);
+        return tmpSensorWorld.set(wx, wy, wz);
     }
 
     update(dt) {
@@ -117,7 +131,7 @@ export class OrbSources {
             const x = c.x + Math.sin(t) * he.x * 0.55;
             const z = c.z + Math.sin(t * 0.63 + 1.3) * he.z * 0.55;
             const y = this.params.source.floorY + this.params.orb.height;
-            this.orb.setTarget(new Vec3(x, y, z));
+            this.orb.setTarget(tmpOrbPos.set(x, y, z));
         } else if (this.params.source.mode === 'click') {
             // keep the orb riding the travel plane even when no arrow key is
             // held, so height changes take effect immediately

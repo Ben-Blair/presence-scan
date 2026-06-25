@@ -2,9 +2,32 @@
 // WebSocket the viewer's mmWave source can consume, since orb-sources.js
 // only speaks raw WebSocket and ESPHome's web_server only speaks SSE.
 //
-// Usage: ESPHOME_HOST=192.168.1.22 node scripts/esphome-bridge.mjs
+// Usage: copy .env.example to .env, set ESPHOME_HOST, then `npm run bridge`
+// (or `npm run dev` which starts vite + the bridge together).
+import { readFileSync, existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const envFile = resolve(root, '.env');
+if (existsSync(envFile)) {
+    for (const line of readFileSync(envFile, 'utf8').split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq === -1) continue;
+        const key = trimmed.slice(0, eq).trim();
+        if (!key || process.env[key] !== undefined) continue;
+        let val = trimmed.slice(eq + 1).trim();
+        if ((val.startsWith('"') && val.endsWith('"')) ||
+            (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+        }
+        process.env[key] = val;
+    }
+}
 
 const ESPHOME_HOST = process.env.ESPHOME_HOST || 'garage-radar.local';
 const ESPHOME_URL = `http://${ESPHOME_HOST}/events`;

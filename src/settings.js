@@ -71,12 +71,21 @@ export function createSettingsPanel(params, hooks) {
         place.addButton({ title: `Set "${anchor.name}" here (${i + 1})`, onClick: () => hooks.captureAnchor(i) });
     });
 
-    // --- Cutaway ---
-    const cut = panel.addSection({ title: 'Cutaway (see inside)' });
+    // --- See inside ---
+    const cut = panel.addSection({ title: 'See inside' });
     cut.addSelect(params.cutaway, 'mode', { options: { Auto: 'auto', On: 'on', Off: 'off' } });
-    cut.addSlider(params.cutaway, 'distance', { min: 0.5, max: 10, step: 0.1, label: 'keep distance' });
     cut.addSlider(params.cutaway, 'softness', { min: 0.05, max: 4, step: 0.05 });
-    cut.addSlider(params.cutaway, 'wallCut', { min: 0.2, max: 3, step: 0.05, label: 'wall peel' });
+    cut.addSlider(params.cutaway, 'engage', { min: 0.05, max: 3, step: 0.05, label: 'fade-in (m)' });
+
+    // Per-side peel depth. x/z are the four walls, y is ceiling/floor. Adjust a
+    // slider and watch which side opens up to learn the mapping for this room.
+    const peel = cut.addSection({ title: 'Wall peel (per side)', expanded: true });
+    peel.addSlider(params.cutaway.wallPeels, 'xPos', { min: 0, max: 10, step: 0.1, label: 'wall +X' });
+    peel.addSlider(params.cutaway.wallPeels, 'xNeg', { min: 0, max: 10, step: 0.1, label: 'wall -X' });
+    peel.addSlider(params.cutaway.wallPeels, 'zPos', { min: 0, max: 10, step: 0.1, label: 'wall +Z' });
+    peel.addSlider(params.cutaway.wallPeels, 'zNeg', { min: 0, max: 10, step: 0.1, label: 'wall -Z' });
+    peel.addSlider(params.cutaway.wallPeels, 'yPos', { min: 0, max: 10, step: 0.1, label: 'ceiling' });
+    peel.addSlider(params.cutaway.wallPeels, 'yNeg', { min: 0, max: 10, step: 0.1, label: 'floor' });
 
     // --- Orb position source ---
     const src = panel.addSection({ title: 'Orb Position Source' });
@@ -97,6 +106,13 @@ export function createSettingsPanel(params, hooks) {
     sensor.addButton({ title: 'Connect', onClick: () => hooks.connectSensor() });
     sensor.addButton({ title: 'Disconnect', onClick: () => hooks.disconnectSensor() });
     sensor.addReadout({ label: 'status', get: () => hooks.sources.sensorStatus });
+
+    // Calibration overlay: show a gizmo of where the program thinks the sensor
+    // is (marker + facing + FOV cone) and a live line to the tracked object, so
+    // the originX/originZ/rotationDeg sliders above can be fine-tuned visually.
+    // (The sensor's own depth is metric — leave 'scale' at its mm→m default.)
+    sensor.addToggle(params.source.sensor, 'showOverlay', { label: 'show sensor overlay' });
+    sensor.addSlider(params.source.sensor, 'mountHeight', { min: 0, max: 4, step: 0.05, label: 'mount height' });
 
     document.body.appendChild(panel.element);
     document.body.appendChild(fab);
