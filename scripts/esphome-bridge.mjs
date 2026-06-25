@@ -43,6 +43,7 @@ console.log(`WebSocket bridge listening on ws://localhost:${PORT}`);
 
 let lastX = null;
 let lastY = null;
+let flushTimer = null;
 
 // Don't dial the ESPHome device until the viewer actually wants sensor data
 // (it opens a WS connection when the "Connect" button in the sensor panel
@@ -108,9 +109,25 @@ function handleBlock(block) {
     else if (msg.id === Y_ID) lastY = msg.value;
     else return;
 
-    if (typeof lastX === 'number' && typeof lastY === 'number') {
-        broadcast(lastX, lastY);
-    }
+    scheduleFlush();
+}
+
+// The LD2450 reports a target as a coordinate pair, but ESPHome exposes X and Y
+// as two separate sensors and the SSE stream sends them as two separate events
+// per detection cycle. Broadcasting on each event would emit an incoherent
+// intermediate point — the freshly-updated axis paired with the *previous*
+// value of the other — making the orb jump in an L (the "choppy" staircase)
+// instead of a straight line, and doubling the message rate with garbage.
+// Coalesce every axis update that lands within one frame into a single
+// {x, y} broadcast so only complete, coherent pairs reach the viewer.
+function scheduleFlush() {
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => {
+        flushTimer = null;
+        if (typeof lastX === 'number' && typeof lastY === 'number') {
+            broadcast(lastX, lastY);
+        }
+    }, 16);
 }
 
 async function run() {
