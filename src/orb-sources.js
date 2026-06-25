@@ -13,31 +13,33 @@ const tmpSensorWorld = new Vec3();
 const tmpPlaneOrigin = new Vec3();
 
 /**
- * Decides where the orb should be. Three sources:
- *  - 'click':  double-click the floor to place the orb
+ * Decides where the orbs should be. Three sources:
+ *  - 'click':  double-click the floor to place the (primary) orb
  *  - 'demo':   the orb wanders around the room on a lissajous path
- *  - 'sensor': positions stream in from an HLK mmwave sensor over WebSocket
+ *  - 'sensor': positions stream in from an HLK mmwave sensor over WebSocket.
+ *              The sensor packet carries up to three targets per frame
+ *              ({ targets: [{x, y, speed}, …] }, mm), one orb each.
  */
 export class OrbSources {
     /**
      * @param {*} app - pc app
      * @param {*} cameraEntity - camera entity
-     * @param {*} orb - Orb instance
+     * @param {import('./orb-field.js').OrbField} field - the orb field
      * @param {*} params - global params object
      * @param {*} roomBounds - { center: Vec3, halfExtents: Vec3 } world-space room bounds
      */
-    constructor(app, cameraEntity, orb, params, roomBounds) {
+    constructor(app, cameraEntity, field, params, roomBounds) {
         this.app = app;
         this.camera = cameraEntity;
-        this.orb = orb;
+        this.field = field;
         this.params = params;
         this.roomBounds = roomBounds;
         this.demoTime = 0;
         this.socket = null;
         this.sensorStatus = 'disconnected';
         this.onStatusChange = null;
-        // latest raw sensor reading {x, y, t} for the minimap diagnostic view
-        this.lastSample = null;
+        // latest raw sensor readings [{x, y, t}, …] for the minimap/overlay views
+        this.lastTargets = [];
 
         const canvas = app.graphicsDevice.canvas;
         canvas.addEventListener('dblclick', (e) => this.onDoubleClick(e));
@@ -62,7 +64,7 @@ export class OrbSources {
         // intersect with the orb travel plane (floor + orb height)
         const hit = this.pickFloorPoint(e.clientX, e.clientY,
             this.params.source.floorY + this.params.orb.height);
-        if (hit) this.orb.setTarget(hit);
+        if (hit) this.field.primary().setTarget(hit);
     }
 
     connectSensor() {
@@ -87,10 +89,22 @@ export class OrbSources {
             this.socket.onmessage = (msg) => {
                 try {
                     const data = JSON.parse(msg.data);
-                    if (typeof data.x === 'number' && typeof data.y === 'number') {
-                        this.lastSample = { x: data.x, y: data.y, t: performance.now() };
-                        this.orb.setTarget(this.sensorToWorld(data.x, data.y));
+                    // New shape: { targets: [{x, y, speed}, …] } (up to three).
+                    // Legacy single-target { x, y } is accepted as one target.
+                    let raw;
+                    if (Array.isArray(data.targets)) {
+                        raw = data.targets.filter(
+                            t => typeof t.x === 'number' && typeof t.y === 'number');
+                    } else if (typeof data.x === 'number' && typeof data.y === 'number') {
+                        raw = [{ x: data.x, y: data.y }];
+                    } else {
+                        return;
                     }
+                    const now = performance.now();
+                    this.lastTargets = raw.map(t => ({ x: t.x, y: t.y, t: now }));
+                    // clone: sensorToWorld returns a shared temp, reused each call
+                    this.field.setTargets(
+                        raw.map(t => this.sensorToWorld(t.x, t.y).clone()));
                 } catch {
                     // ignore malformed messages
                 }
@@ -105,6 +119,9 @@ export class OrbSources {
             this.socket.close();
             this.socket = null;
         }
+        // drop any extra orbs the sensor had spawned and clear the diagnostics
+        this.lastTargets = [];
+        this.field.collapseToPrimary();
         this.sensorStatus = 'disconnected';
         this.onStatusChange?.();
     }
@@ -124,6 +141,7 @@ export class OrbSources {
 
     update(dt) {
         if (this.params.source.mode === 'demo') {
+            this.field.collapseToPrimary();
             this.demoTime += dt * this.params.source.demoSpeed;
             const t = this.demoTime;
             const c = this.roomBounds.center;
@@ -131,11 +149,12 @@ export class OrbSources {
             const x = c.x + Math.sin(t) * he.x * 0.55;
             const z = c.z + Math.sin(t * 0.63 + 1.3) * he.z * 0.55;
             const y = this.params.source.floorY + this.params.orb.height;
-            this.orb.setTarget(tmpOrbPos.set(x, y, z));
+            this.field.primary().setTarget(tmpOrbPos.set(x, y, z));
         } else if (this.params.source.mode === 'click') {
+            this.field.collapseToPrimary();
             // keep the orb riding the travel plane even when no arrow key is
             // held, so height changes take effect immediately
-            this.orb.target.y = this.params.source.floorY + this.params.orb.height;
+            this.field.primary().target.y = this.params.source.floorY + this.params.orb.height;
             this.updateKeyboard(dt);
         }
     }
@@ -159,6 +178,7 @@ export class OrbSources {
 
         tmpRight.cross(tmpForward, Vec3.UP).normalize();
 
+        const orb = this.field.primary();
         tmpMove.set(0, 0, 0);
         if (dz !== 0) {
             tmpMove.x += tmpForward.x * dz * speed;
@@ -169,7 +189,7 @@ export class OrbSources {
             tmpMove.z += tmpRight.z * dx * speed;
         }
 
-        tmpOrbPos.copy(this.orb.target).add(tmpMove);
+        tmpOrbPos.copy(orb.target).add(tmpMove);
         tmpOrbPos.y = this.params.source.floorY + this.params.orb.height;
 
         const { center, halfExtents } = this.roomBounds;
@@ -181,6 +201,6 @@ export class OrbSources {
         tmpOrbPos.x = Math.min(maxX, Math.max(minX, tmpOrbPos.x));
         tmpOrbPos.z = Math.min(maxZ, Math.max(minZ, tmpOrbPos.z));
 
-        this.orb.setTarget(tmpOrbPos);
+        orb.setTarget(tmpOrbPos);
     }
 }

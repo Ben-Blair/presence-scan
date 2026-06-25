@@ -5,3 +5,11 @@ dist/
 .env
 .env.*
 public/assets/*.tmp
+
+# ESPHome (superseded by firmware/garage-radar/, kept for flashing history)
+esphome/.esphome/
+esphome/secrets.yaml
+
+# PlatformIO firmware
+firmware/garage-radar/.pio/
+firmware/garage-radar/src/secrets.h

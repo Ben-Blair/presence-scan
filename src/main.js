@@ -24,7 +24,7 @@ import { CameraControls } from './camera-controls.js';
 
 import { params } from './params.js';
 import { applyParams, resolveStartup, resetToDefaults, saveSession } from './settings-store.js';
-import { Orb } from './orb.js';
+import { OrbField } from './orb-field.js';
 import { SplatFX } from './splat-effects.js';
 import { OrbSources } from './orb-sources.js';
 import { WaypointCamera } from './waypoint-camera.js';
@@ -148,10 +148,13 @@ function buildScene() {
     });
     controls.reset(spawnFocus, spawnEye);
 
-    // ---------------------------------------------------------- orb
-    const orb = new Orb(app);
-    orb.applyParams(params.orb);
-    orb.teleport(orbStart);
+    // ---------------------------------------------------------- orbs
+    // Up to three orbs, one per tracked person (sensor mode). Click/demo modes
+    // drive just the primary; single-target subsystems below follow primary().
+    const field = new OrbField(app);
+    field.applyParams(params.orb);
+    field.primary().teleport(orbStart);
+    const orb = field.primary();
 
     // ---------------------------------------------------------- splat fx
     const splatFX = new SplatFX(app, splat);
@@ -168,7 +171,7 @@ function buildScene() {
     }
 
     // ---------------------------------------------------------- orb sources
-    const sources = new OrbSources(app, camera, orb, params, { center, halfExtents });
+    const sources = new OrbSources(app, camera, field, params, { center, halfExtents });
 
     // ---------------------------------------------------------- waypoint cam
     const autoCam = new WaypointCamera(camera, controls, orb, { center, halfExtents }, params);
@@ -223,13 +226,13 @@ function buildScene() {
     // In-scene gizmo of where the program thinks the sensor is (marker + facing
     // + FOV cone) plus a live line to the tracked object, for visually fine-tuning
     // the sensor placement against the scan.
-    const sensorOverlay = new SensorOverlay(app, params, orb, sources);
+    const sensorOverlay = new SensorOverlay(app, params, field, sources);
 
     // ---------------------------------------------------------- settings
     const hooks = {
         sources,
         captureAnchor,
-        onOrbChanged: () => orb.applyParams(params.orb),
+        onOrbChanged: () => field.applyParams(params.orb),
         onCameraChanged: () => {
             controls.moveSpeed = params.camera.moveSpeed;
             controls.moveFastSpeed = params.camera.moveFastSpeed;
@@ -271,7 +274,7 @@ function buildScene() {
     wireHotkeys({ pane, controls, orb, captureAnchor, saveCurrentSession });
 
     // debug handle for console inspection
-    window.__viewer = { app, splat, camera, controls, orb, sources, autoCam, minimap, sensorOverlay, center, halfExtents, params };
+    window.__viewer = { app, splat, camera, controls, orb, field, sources, autoCam, minimap, sensorOverlay, center, halfExtents, params };
 
     // ---------------------------------------------------------- per-frame
     // auto-cutaway engages only when the camera is clearly OUTSIDE the room, so
@@ -287,7 +290,7 @@ function buildScene() {
 
     app.on('update', (dt) => {
         sources.update(dt);
-        orb.update(dt, params.orb.smoothing);
+        field.update(dt, params.orb.smoothing);
         sensorOverlay.update();
 
         // anchor follow mode: drive the camera automatically (suspends the
@@ -301,7 +304,6 @@ function buildScene() {
         }
         autoCam.update(dt);
 
-        const orbPos = orb.getPosition();
         const camPos = camera.getPosition();
 
         // cutaway state. While anchor follow drives the camera we want a solid
@@ -317,8 +319,13 @@ function buildScene() {
         // camera motion doesn't trigger a gsplat resort every frame.
         const glowFacingOn = params.orb.glowIntensity > 0 && params.orb.glowFacing > 0;
         const orbStep = params.source.mode === 'click' ? 0.01 : 0.02;
+        // one [x,y,z] per active orb, quantized so idle jitter doesn't resort
+        const orbs = field.active().map((o) => {
+            const p = o.getPosition();
+            return [round(p.x, orbStep), round(p.y, orbStep), round(p.z, orbStep)];
+        });
         splatFX.setParams({
-            orbPos: [round(orbPos.x, orbStep), round(orbPos.y, orbStep), round(orbPos.z, orbStep)],
+            orbs,
             orbColor: [params.orb.color.r, params.orb.color.g, params.orb.color.b],
             orbIntensity: params.orb.glowIntensity,
             orbRadius: params.orb.glowRadius,

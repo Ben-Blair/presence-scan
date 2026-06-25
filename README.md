@@ -13,30 +13,35 @@ npm run dev
 
 Open the printed URL (default http://localhost:5173).
 
-`npm run dev` starts the Vite viewer and the ESPHome→WebSocket bridge. For the
-viewer only (no sensor), use `npm run dev:vite-only`.
+`npm run dev` starts the Vite viewer (`dev:vite-only` is a synonym). The sensor
+feed comes straight from the ESP device — there is no Node bridge to run.
 
-## mmWave sensor (HLK LD2450 + ESPHome)
+## mmWave sensor (HLK LD2450)
 
-The viewer does not talk to ESPHome directly. ESPHome's `web_server` exposes
-sensor state as **Server-Sent Events** (`http://<host>/events`); the browser
-client expects a plain **WebSocket** stream of JSON `{"x": <mm>, "y": <mm>}`.
-`scripts/esphome-bridge.mjs` translates between the two.
+The radar runs **custom ESP32 firmware** (`firmware/garage-radar/`) that parses
+the raw LD2450 frames and serves all tracked targets over its own **WebSocket**.
+The viewer connects directly — no ESPHome, no SSE, no bridge. Each frame is one
+packet at the sensor's full ~10 Hz:
+
+```json
+{"targets":[{"x":-820,"y":1740,"speed":-12}, {"x":410,"y":2300,"speed":0}]}
+```
+
+X/Y are millimetres in sensor space; up to three targets (three people) appear as
+three orbs in the scan. See `firmware/garage-radar/README.md` for flashing.
 
 ### Setup
 
-1. Copy `.env.example` to `.env` and set `ESPHOME_HOST` to your node's hostname
-   or IP (default in the bridge: `garage-radar.local`).
-2. In ESPHome, expose the LD2450 target position as two **template or sensor
-   entities named exactly** `Orb X` and `Orb Y` (millimetres, sensor at origin).
-   ESPHome slugifies these to `sensor-orb_x` and `sensor-orb_y` in the SSE feed —
-   those ids are hardcoded in the bridge; rename the sensors in YAML if you change
-   the names.
-3. Enable `web_server` on the ESPHome device.
-4. Run `npm run dev`, open the viewer, set **Orb Position Source** to **mmWave
-   sensor**, click **Connect** (WebSocket URL defaults to `ws://localhost:8081`).
-5. Calibrate **originX**, **originZ**, **rotationDeg**, **scale**, and **mirror Y**
+1. Flash the firmware (`firmware/garage-radar/` — PlatformIO; fill in WiFi
+   `secrets.h`). The device comes up at `ws://garage-radar.local:81`.
+2. Run `npm run dev`, open the viewer, set **Orb Position Source** to **mmWave
+   sensor**, click **Connect** (WebSocket URL defaults to
+   `ws://garage-radar.local:81`).
+3. Calibrate **originX**, **originZ**, **rotationDeg**, **scale**, and **mirror Y**
    in the panel until the orb lines up with your position in the splat.
+
+> The viewer must be served over **http** (Vite dev / LAN) — an `https` page
+> can't open the insecure `ws://` the ESP serves (mixed content).
 
 ### Radar alignment
 
@@ -70,7 +75,8 @@ Fly the camera overhead to read the floor plan: sensor dot at the wedge apex, co
 - **Occlusion** — optional depth-only render of the collision mesh for crisp orb
   occlusion behind walls.
 - **Orb Position Source** — click-to-place, demo path, or HLK mmWave over WebSocket
-  (JSON messages `{"x": <mm>, "y": <mm>}` with origin/rotation/scale calibration).
+  (JSON `{"targets":[{"x":<mm>,"y":<mm>}, …]}` — up to three people, one orb each —
+  with origin/rotation/scale calibration).
 
 ## Assets
 

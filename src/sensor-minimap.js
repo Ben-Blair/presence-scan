@@ -7,7 +7,7 @@
  * accurately, independent of how the orb is calibrated into the room.
  *
  * Self-contained: it owns a DOM canvas and its own requestAnimationFrame loop,
- * and only reads from the shared OrbSources (`lastSample`, `sensorStatus`).
+ * and only reads from the shared OrbSources (`lastTargets`, `sensorStatus`).
  */
 export class SensorMinimap {
     /**
@@ -28,9 +28,12 @@ export class SensorMinimap {
         this.bottomPad = 30;     // room for the coordinate readout text
         this.R = this.cssH - this.originY - this.bottomPad; // pixels for maxRange
 
-        this.trail = [];         // [{ px, py, t }] recent target positions
+        this.trails = [];        // per-slot [{ px, py, t }] recent positions
         this.trailMs = 1100;
-        this.lastSeenT = -1;     // sources.lastSample.t we last ingested
+        this.lastSeen = [];      // per-slot sources.lastTargets[i].t last ingested
+        // one colour per target slot (matches the up-to-three orbs)
+        this.palette = ['#ff5a5a', '#ffb14a', '#49e0a0'];
+        this.trailRGB = [[255, 90, 90], [255, 177, 74], [73, 224, 160]];
         this._raf = 0;
         this._running = false;
 
@@ -91,28 +94,35 @@ export class SensorMinimap {
         }
 
         const now = performance.now();
-        const sample = this.sources.lastSample;
+        const samples = this.sources.lastTargets || [];
 
         // A fresh, non-zero sample means a tracked target; (0,0) = "no target".
-        let target = null;
-        if (sample && !(sample.x === 0 && sample.y === 0) && now - sample.t < 1500) {
-            const mx = sample.x / 1000; // lateral metres (raw, +x = right)
-            const my = sample.y / 1000; // distance metres (forward)
-            target = {
-                mx, my,
+        const targets = [];
+        for (let i = 0; i < samples.length; i++) {
+            const s = samples[i];
+            if (s.x === 0 && s.y === 0) continue;
+            if (now - s.t >= 1500) continue;
+            const mx = s.x / 1000; // lateral metres (raw, +x = right)
+            const my = s.y / 1000; // distance metres (forward)
+            targets.push({
+                mx, my, slot: i,
                 dist: Math.hypot(mx, my),
                 angle: Math.atan2(mx, my) * 180 / Math.PI // 0 = straight ahead
-            };
-            if (sample.t !== this.lastSeenT) {
-                this.lastSeenT = sample.t;
+            });
+            if (!this.trails[i]) this.trails[i] = [];
+            if (s.t !== this.lastSeen[i]) {
+                this.lastSeen[i] = s.t;
                 const p = this._toPixels(mx, my);
-                this.trail.push({ px: p.x, py: p.y, t: now });
+                this.trails[i].push({ px: p.x, py: p.y, t: now });
             }
         }
-        // prune the trail
-        while (this.trail.length && now - this.trail[0].t > this.trailMs) this.trail.shift();
+        // prune every slot's trail
+        for (const tr of this.trails) {
+            if (!tr) continue;
+            while (tr.length && now - tr[0].t > this.trailMs) tr.shift();
+        }
 
-        this._draw(target, now);
+        this._draw(targets, now);
 
         if (this._running) {
             this._raf = requestAnimationFrame(() => this._frame());
@@ -125,7 +135,7 @@ export class SensorMinimap {
         return { x: ox + mx * k, y: this.originY + my * k };
     }
 
-    _draw(target, now) {
+    _draw(targets, now) {
         const ctx = this.ctx;
         const W = this.cssW;
         const H = this.cssH;
@@ -196,35 +206,47 @@ export class SensorMinimap {
             : status === 'error' ? '#ff7b7b' : 'rgba(232, 232, 240, 0.5)';
         ctx.fillText(status, W - 8, 11);
 
-        // target trail (older = fainter)
-        for (const p of this.trail) {
-            const age = (now - p.t) / this.trailMs;
-            ctx.beginPath();
-            ctx.arc(p.px, p.py, 2.5, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255, 107, 107, ${0.35 * (1 - age)})`;
-            ctx.fill();
+        // per-slot target trails (older = fainter)
+        for (let i = 0; i < this.trails.length; i++) {
+            const tr = this.trails[i];
+            if (!tr) continue;
+            const [tr0, tg0, tb0] = this.trailRGB[i % this.trailRGB.length];
+            for (const p of tr) {
+                const age = (now - p.t) / this.trailMs;
+                ctx.beginPath();
+                ctx.arc(p.px, p.py, 2.5, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${tr0}, ${tg0}, ${tb0}, ${0.35 * (1 - age)})`;
+                ctx.fill();
+            }
         }
 
-        // current target
+        // current targets (one dot each, colour-coded by slot)
         ctx.textAlign = 'center';
         ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace';
-        if (target) {
+        for (const target of targets) {
+            const colour = this.palette[target.slot % this.palette.length];
+            const [r, g, b] = this.trailRGB[target.slot % this.trailRGB.length];
             const p = this._toPixels(target.mx, target.my);
             // clamp the glyph inside the canvas if the target overruns the range
             const px = Math.max(8, Math.min(W - 8, p.x));
             const py = Math.max(oy, Math.min(H - this.bottomPad, p.y));
             ctx.beginPath();
             ctx.arc(px, py, 9, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(255, 107, 107, 0.18)';
+            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.18)`;
             ctx.fill();
             ctx.beginPath();
             ctx.arc(px, py, 4.5, 0, Math.PI * 2);
-            ctx.fillStyle = '#ff5a5a';
+            ctx.fillStyle = colour;
             ctx.fill();
+        }
 
+        // numeric readout for the primary (first) target
+        if (targets.length) {
+            const target = targets[0];
             ctx.fillStyle = 'rgba(232, 232, 240, 0.92)';
             const sx = (target.mx >= 0 ? '+' : '') + target.mx.toFixed(2);
-            ctx.fillText(`x ${sx}m   y ${target.my.toFixed(2)}m`, W / 2, H - 18);
+            const more = targets.length > 1 ? `   +${targets.length - 1}` : '';
+            ctx.fillText(`x ${sx}m   y ${target.my.toFixed(2)}m${more}`, W / 2, H - 18);
             ctx.fillStyle = 'rgba(143, 208, 255, 0.85)';
             ctx.fillText(`${target.dist.toFixed(2)} m   ${target.angle >= 0 ? '+' : ''}${target.angle.toFixed(0)}°`, W / 2, H - 6);
         } else {

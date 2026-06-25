@@ -12,7 +12,10 @@
 //     no face qualifies, so nothing is culled.
 
 const GLSL = /* glsl */`
-uniform vec3 uOrbPos;
+uniform vec3 uOrbPos0;       // up to three orb positions (one per tracked person)
+uniform vec3 uOrbPos1;
+uniform vec3 uOrbPos2;
+uniform float uOrbCount;     // how many of the above are active (0..3)
 uniform vec3 uOrbColor;
 uniform float uOrbIntensity;
 uniform float uOrbRadius;
@@ -57,24 +60,31 @@ void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout ve
     gSplatAniso = maxS > 0.0 ? clamp((maxS - minS) / maxS, 0.0, 1.0) : 0.0;
 }
 
+// point-light style glow contribution from one orb onto this splat.
+vec3 orbGlow(vec3 center, vec3 orbPos) {
+    float d = distance(center, orbPos);
+    float r = max(uOrbRadius, 0.001);
+    float atten = 1.0 / (1.0 + (d * d) / (r * r));
+    // hard cutoff well outside the radius so distant splats are untouched
+    float cutoff = smoothstep(r * 4.0, r, d);
+
+    // only glow surfaces oriented toward the orb. flip the (sign-ambiguous)
+    // normal to the visible face, then test against the direction to the orb.
+    vec3 n = gSplatNormal;
+    if (dot(n, normalize(uViewPos - center)) < 0.0) n = -n;
+    float facing = smoothstep(-0.1, 0.4, dot(n, normalize(orbPos - center)));
+    // round/isotropic splats have no reliable normal, so fall back to full glow
+    facing = mix(1.0, facing, gSplatAniso * uGlowFacing);
+
+    return uOrbColor * (uOrbIntensity * atten * cutoff * facing);
+}
+
 void modifySplatColor(vec3 center, inout vec4 color) {
-    // orb glow onto the splat
+    // accumulate the glow from each active orb (up to three tracked people)
     if (uOrbIntensity > 0.0) {
-        float d = distance(center, uOrbPos);
-        float r = max(uOrbRadius, 0.001);
-        float atten = 1.0 / (1.0 + (d * d) / (r * r));
-        // hard cutoff well outside the radius so distant splats are untouched
-        float cutoff = smoothstep(r * 4.0, r, d);
-
-        // only glow surfaces oriented toward the orb. flip the (sign-ambiguous)
-        // normal to the visible face, then test against the direction to the orb.
-        vec3 n = gSplatNormal;
-        if (dot(n, normalize(uViewPos - center)) < 0.0) n = -n;
-        float facing = smoothstep(-0.1, 0.4, dot(n, normalize(uOrbPos - center)));
-        // round/isotropic splats have no reliable normal, so fall back to full glow
-        facing = mix(1.0, facing, gSplatAniso * uGlowFacing);
-
-        color.rgb += uOrbColor * (uOrbIntensity * atten * cutoff * facing);
+        if (uOrbCount > 0.5) color.rgb += orbGlow(center, uOrbPos0);
+        if (uOrbCount > 1.5) color.rgb += orbGlow(center, uOrbPos1);
+        if (uOrbCount > 2.5) color.rgb += orbGlow(center, uOrbPos2);
     }
 
     // cutaway: peel the camera-facing wall(s) of the room box so you can see in.
@@ -106,7 +116,10 @@ void modifySplatColor(vec3 center, inout vec4 color) {
 `;
 
 const WGSL = /* wgsl */`
-uniform uOrbPos: vec3f;
+uniform uOrbPos0: vec3f;      // up to three orb positions (one per tracked person)
+uniform uOrbPos1: vec3f;
+uniform uOrbPos2: vec3f;
+uniform uOrbCount: f32;       // how many of the above are active (0..3)
 uniform uOrbColor: vec3f;
 uniform uOrbIntensity: f32;
 uniform uOrbRadius: f32;
@@ -155,24 +168,34 @@ fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotati
     gSplatAniso = select(0.0, clamp((maxS - minS) / maxS, 0.0, 1.0), maxS > 0.0);
 }
 
+// point-light style glow contribution from one orb onto this splat.
+fn orbGlow(center: vec3f, orbPos: vec3f) -> vec3f {
+    let d = distance(center, orbPos);
+    let r = max(uniform.uOrbRadius, 0.001);
+    let atten = 1.0 / (1.0 + (d * d) / (r * r));
+    let cutoff = smoothstep(r * 4.0, r, d);
+
+    // only glow surfaces oriented toward the orb. flip the (sign-ambiguous)
+    // normal to the visible face, then test against the direction to the orb.
+    var n = gSplatNormal;
+    if (dot(n, normalize(uniform.uViewPos - center)) < 0.0) {
+        n = -n;
+    }
+    var facing = smoothstep(-0.1, 0.4, dot(n, normalize(orbPos - center)));
+    // round/isotropic splats have no reliable normal, so fall back to full glow
+    facing = mix(1.0, facing, gSplatAniso * uniform.uGlowFacing);
+
+    return uniform.uOrbColor * (uniform.uOrbIntensity * atten * cutoff * facing);
+}
+
 fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
+    // accumulate the glow from each active orb (up to three tracked people)
     if (uniform.uOrbIntensity > 0.0) {
-        let d = distance(center, uniform.uOrbPos);
-        let r = max(uniform.uOrbRadius, 0.001);
-        let atten = 1.0 / (1.0 + (d * d) / (r * r));
-        let cutoff = smoothstep(r * 4.0, r, d);
-
-        // only glow surfaces oriented toward the orb. flip the (sign-ambiguous)
-        // normal to the visible face, then test against the direction to the orb.
-        var n = gSplatNormal;
-        if (dot(n, normalize(uniform.uViewPos - center)) < 0.0) {
-            n = -n;
-        }
-        var facing = smoothstep(-0.1, 0.4, dot(n, normalize(uniform.uOrbPos - center)));
-        // round/isotropic splats have no reliable normal, so fall back to full glow
-        facing = mix(1.0, facing, gSplatAniso * uniform.uGlowFacing);
-
-        (*color) = vec4f((*color).rgb + uniform.uOrbColor * (uniform.uOrbIntensity * atten * cutoff * facing), (*color).a);
+        var glow = vec3f(0.0);
+        if (uniform.uOrbCount > 0.5) { glow += orbGlow(center, uniform.uOrbPos0); }
+        if (uniform.uOrbCount > 1.5) { glow += orbGlow(center, uniform.uOrbPos1); }
+        if (uniform.uOrbCount > 2.5) { glow += orbGlow(center, uniform.uOrbPos2); }
+        (*color) = vec4f((*color).rgb + glow, (*color).a);
     }
 
     if (uniform.uCutEnabled > 0.5) {
@@ -232,7 +255,7 @@ export class SplatFX {
      * resorts), so this short-circuits when nothing changed.
      *
      * @param {object} p
-     * @param {number[]} p.orbPos        - world-space orb position [x,y,z]
+     * @param {number[][]} p.orbs        - active orb positions [[x,y,z], …] (0..3)
      * @param {number[]} p.orbColor      - orb glow color [r,g,b]
      * @param {number}   p.orbIntensity  - glow intensity
      * @param {number}   p.orbRadius     - glow radius
@@ -246,8 +269,13 @@ export class SplatFX {
      * @param {number}   p.glowFacing    - surface-facing glow weight
      */
     setParams(p) {
+        const zero = [0, 0, 0];
+        const o0 = p.orbs[0] || zero;
+        const o1 = p.orbs[1] || zero;
+        const o2 = p.orbs[2] || zero;
+        const count = p.orbs.length;
         const key = [
-            ...p.orbPos, ...p.orbColor, p.orbIntensity, p.orbRadius,
+            count, ...o0, ...o1, ...o2, ...p.orbColor, p.orbIntensity, p.orbRadius,
             p.cutEnabled, ...p.cutCamPos, ...p.wallPeelPos, ...p.wallPeelNeg,
             p.cutSoft, p.cutEngage, ...p.viewPos, p.glowFacing
         ].join(',');
@@ -255,7 +283,10 @@ export class SplatFX {
         this._last = key;
 
         const g = this.splatEntity.gsplat;
-        g.setParameter('uOrbPos', p.orbPos);
+        g.setParameter('uOrbCount', count);
+        g.setParameter('uOrbPos0', o0);
+        g.setParameter('uOrbPos1', o1);
+        g.setParameter('uOrbPos2', o2);
         g.setParameter('uOrbColor', p.orbColor);
         g.setParameter('uOrbIntensity', p.orbIntensity);
         g.setParameter('uOrbRadius', p.orbRadius);

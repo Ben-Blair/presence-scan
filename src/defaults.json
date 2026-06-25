@@ -54,7 +54,7 @@
       "demoSpeed": 0.25,
       "floorY": 0,
       "sensor": {
-        "url": "ws://localhost:8081",
+        "url": "ws://garage-radar.local:81",
         "originX": 0,
         "originZ": 0,
         "rotationDeg": 0,

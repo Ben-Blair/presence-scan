@@ -1,0 +1,104 @@
+# SUPERSEDED — kept for flashing history only.
+#
+# The live firmware is now firmware/garage-radar/ (custom Arduino/PlatformIO):
+# it parses the raw LD2450 frames and streams ALL targets at full rate over a
+# WebSocket the viewer connects to directly. This ESPHome config only spoke SSE,
+# exposed just target_1's X/Y, and required scripts/esphome-bridge.mjs (deleted).
+#
+# Garage mmWave radar for the splat viewer.
+#
+# Drives the "location orb" in the PlayCanvas garage scan. The viewer's sensor
+# mode connects to scripts/esphome-bridge.mjs, which dials this device at
+# http://garage-radar.local/events (ESPHome's web_server SSE stream) and parses
+# the "Orb X" / "Orb Y" sensor states (slugified to sensor-orb_x / sensor-orb_y)
+# into {x, y} WebSocket messages. Those two sensors below are the contract;
+# everything else is plumbing.
+#
+# Hardware: ESP32-C3 devkit + HLK-LD2450 mmWave radar on UART (256000 baud).
+# Flash:  esphome run esphome/garage-radar.yaml   (USB first time, OTA after)
+
+esphome:
+  name: garage-radar
+  friendly_name: Garage Radar
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:
+
+# Over-the-air updates so reflashing doesn't need the USB cable once it's mounted.
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Keep the WiFi radio fully awake. By default the ESP sleeps between beacons
+  # (~100ms+), which batches the web_server's SSE pushes and makes the live
+  # position feed arrive in stutters instead of streaming. NONE is what makes
+  # real-time radar tracking feel smooth.
+  power_save_mode: none
+
+  # Fallback captive portal if the home wifi is unreachable, so the device is
+  # never bricked-by-network.
+  ap:
+    ssid: "Garage Radar Fallback"
+    password: "garageorb1234"
+
+captive_portal:
+
+# The SSE stream the bridge consumes lives here (http://garage-radar.local/events).
+web_server:
+  port: 80
+
+uart:
+  id: uart_ld2450
+  rx_buffer_size: 1024  # headroom so radar frames aren't dropped on a slow loop
+  tx_pin: GPIO21
+  rx_pin: GPIO20
+  baud_rate: 256000
+
+ld2450:
+  uart_id: uart_ld2450
+  id: ld2450_radar
+
+# --- The viewer contract: target #1's position in millimetres. -----------------
+# "Orb X" -> sensor-orb_x, "Orb Y" -> sensor-orb_y. orb-sources.js applies the
+# origin/rotation/scale/flip calibration to turn these into world coordinates.
+sensor:
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    target_1:
+      # The ld2450 component defaults these to a throttle_with_priority of
+      # 1000ms (one update/sec, to avoid flooding Home Assistant). For the orb
+      # we want the radar's full frame rate, so override with no throttle —
+      # the bridge coalesces X/Y within 16ms and the orb eases anyway.
+      # The component defaults these to throttle_with_priority: 1000ms (1 update/
+      # sec, to spare Home Assistant). Override with no filters so positions
+      # stream at the radar's full frame rate; when you MOVE, updates now flow
+      # several times a second instead of being clamped to 1 Hz. (force_update
+      # was tried and dropped: the web_server SSE dedupes identical states
+      # regardless, so it had no effect.) A still target emits little by design —
+      # nothing has changed — and the orb simply holds position.
+      x:
+        name: "Orb X"
+        filters: []
+      y:
+        name: "Orb Y"
+        filters: []
+
+# Handy extras for sanity-checking presence in the web UI; not used by the bridge.
+binary_sensor:
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    has_target:
+      name: "Presence"
+
+text_sensor:
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    version:
+      name: "LD2450 Firmware"

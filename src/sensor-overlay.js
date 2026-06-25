@@ -20,10 +20,10 @@ const COL_MARK = new Color(0.35, 0.95, 1.0);   // sensor body marker
 const COL_DETECT = new Color(1.0, 0.45, 0.15); // sensor → tracked object
 
 export class SensorOverlay {
-    constructor(app, params, orb, sources) {
+    constructor(app, params, field, sources) {
         this.app = app;
         this.params = params;
-        this.orb = orb;
+        this.field = field;
         this.sources = sources;
         this._apex = new Vec3();
         this._mount = new Vec3();
@@ -66,10 +66,12 @@ export class SensorOverlay {
         app.drawWireSphere(this._mount, 0.12, COL_MARK, 12, false);
         app.drawLine(this._mount, this._apex, COL_MARK, false);
 
-        // live detection: line from the sensor to the tracked object
-        const last = this.sources.lastSample;
-        if (last && !(last.x === 0 && last.y === 0) && performance.now() - last.t < SAMPLE_STALE_MS) {
-            app.drawLine(this._mount, this.orb.getPosition(), COL_DETECT, false);
+        // live detection: a line from the sensor to each tracked object (orb)
+        const targets = this.sources.lastTargets;
+        if (targets && targets.length && performance.now() - targets[0].t < SAMPLE_STALE_MS) {
+            for (const o of this.field.active()) {
+                app.drawLine(this._mount, o.getPosition(), COL_DETECT, false);
+            }
         }
     }
 }
