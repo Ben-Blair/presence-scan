@@ -32,6 +32,7 @@ export class SensorMinimap {
         this.trailMs = 1100;
         this.lastSeenT = -1;     // sources.lastSample.t we last ingested
         this._raf = 0;
+        this._running = false;
 
         this.el = document.createElement('div');
         this.el.className = 'radar-minimap';
@@ -53,16 +54,28 @@ export class SensorMinimap {
 
     mount() {
         document.body.appendChild(this.el);
-        const loop = () => {
-            this._frame();
-            this._raf = requestAnimationFrame(loop);
-        };
-        this._raf = requestAnimationFrame(loop);
+        this.wake();
     }
 
     destroy() {
-        cancelAnimationFrame(this._raf);
+        this._stop();
         this.el.remove();
+    }
+
+    /** Start (or keep) the draw loop when the radar may become visible. */
+    wake() {
+        if (!this._running) {
+            this._running = true;
+            this._raf = requestAnimationFrame(() => this._frame());
+        }
+    }
+
+    _stop() {
+        this._running = false;
+        if (this._raf) {
+            cancelAnimationFrame(this._raf);
+            this._raf = 0;
+        }
     }
 
     _frame() {
@@ -72,7 +85,10 @@ export class SensorMinimap {
         const visible = this.params.source.mode === 'sensor' ||
             st === 'connected' || st === 'connecting…';
         this.el.classList.toggle('radar-minimap--on', visible);
-        if (!visible) return;
+        if (!visible) {
+            this._stop();
+            return;
+        }
 
         const now = performance.now();
         const sample = this.sources.lastSample;
@@ -97,6 +113,10 @@ export class SensorMinimap {
         while (this.trail.length && now - this.trail[0].t > this.trailMs) this.trail.shift();
 
         this._draw(target, now);
+
+        if (this._running) {
+            this._raf = requestAnimationFrame(() => this._frame());
+        }
     }
 
     _toPixels(mx, my) {

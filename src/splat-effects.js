@@ -3,8 +3,13 @@
 //
 // Two effects:
 //  1. Orb glow: point-light style falloff added to splat color around the orb.
-//  2. Cutaway: splats between the camera and the focus point (minus a keep
-//     distance) fade out, so you can zoom outside the garage and still see in.
+//  2. Cutaway: a view-dependent "see-inside" peel. The room is an axis-aligned
+//     box; for each box face the camera is clearly OUTSIDE of, the splats just
+//     past that face (the near wall + the floaters/fuzz in front of it) fade out,
+//     while the interior, far wall, side walls, and far-side floaters stay solid.
+//     Because it peels by face (not a single angled plane) the whole near wall
+//     clears even when you view it off-center. When the camera is inside the box
+//     no face qualifies, so nothing is culled.
 
 const GLSL = /* glsl */`
 uniform vec3 uOrbPos;
@@ -16,9 +21,10 @@ uniform float uGlowFacing;
 
 uniform float uCutEnabled;
 uniform vec3 uCutCamPos;
-uniform vec3 uCutFocusPos;
-uniform float uCutDist;
+uniform vec3 uWallPeelPos;   // peel depth for the +X/+Y/+Z faces
+uniform vec3 uWallPeelNeg;   // peel depth for the -X/-Y/-Z faces
 uniform float uCutSoft;
+uniform float uCutEngage;
 uniform vec3 uRoomMin;
 uniform vec3 uRoomMax;
 
@@ -35,6 +41,9 @@ void modifySplatCenter(inout vec3 center) {
 }
 
 void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
+    // normals are only consumed by the orb glow; skip the quat work when off.
+    if (uOrbIntensity <= 0.0 || uGlowFacing <= 0.0) return;
+
     // the gaussian's flattest axis (smallest scale) approximates the surface normal
     vec3 s = scale;
     vec3 axis;
@@ -68,21 +77,28 @@ void modifySplatColor(vec3 center, inout vec4 color) {
         color.rgb += uOrbColor * (uOrbIntensity * atten * cutoff * facing);
     }
 
-    // cutaway: hide splats on the camera side of the keep volume, and hide
-    // floaters/outliers outside the room box for a clean dollhouse view
+    // cutaway: peel the camera-facing wall(s) of the room box so you can see in.
     if (uCutEnabled > 0.5) {
-        vec3 toFocus = uCutFocusPos - uCutCamPos;
-        float focusDist = length(toFocus);
-        vec3 dir = toFocus / max(focusDist, 0.0001);
-        float t = dot(center - uCutCamPos, dir);
-        float cutPlane = focusDist - uCutDist;
-        float fade = smoothstep(cutPlane - uCutSoft, cutPlane, t);
-
         vec3 roomCenter = (uRoomMin + uRoomMax) * 0.5;
         vec3 roomHalf = (uRoomMax - uRoomMin) * 0.5;
-        vec3 outsideVec = max(abs(center - roomCenter) - roomHalf, vec3(0.0));
-        float outsideDist = length(outsideVec);
-        fade *= 1.0 - smoothstep(0.0, 0.6, outsideDist);
+
+        // only peel faces the camera is clearly outside of, and ramp the peel in
+        // smoothly over uCutEngage meters as the camera moves out (no hard pop).
+        // Below the 0.3m start it is fully off, so standing near a wall from the
+        // inside never peels.
+        vec3 rel = uCutCamPos - roomCenter;
+        vec3 camOutside = smoothstep(0.3, 0.3 + max(uCutEngage, 0.001), abs(rel) - roomHalf);
+        vec3 camSign = sign(rel);
+
+        // each face has its own peel depth; pick the +/- side facing the camera.
+        // hide splats past the peel plane (the near face pulled inward by peel).
+        // take the strongest peel across the up-to-three faces the camera looks
+        // through; non-facing faces contribute 0 (multiplied out).
+        vec3 peel = mix(uWallPeelNeg, uWallPeelPos, step(0.0, rel));
+        vec3 srel = center - roomCenter;
+        vec3 beyond = (srel * camSign - (roomHalf - peel)) * camOutside;
+        float cut = max(beyond.x, max(beyond.y, beyond.z));
+        float fade = 1.0 - smoothstep(0.0, uCutSoft, cut);
 
         color.a *= fade;
     }
@@ -99,9 +115,10 @@ uniform uGlowFacing: f32;
 
 uniform uCutEnabled: f32;
 uniform uCutCamPos: vec3f;
-uniform uCutFocusPos: vec3f;
-uniform uCutDist: f32;
+uniform uWallPeelPos: vec3f;   // peel depth for the +X/+Y/+Z faces
+uniform uWallPeelNeg: vec3f;   // peel depth for the -X/-Y/-Z faces
 uniform uCutSoft: f32;
+uniform uCutEngage: f32;
 uniform uRoomMin: vec3f;
 uniform uRoomMax: vec3f;
 
@@ -118,6 +135,9 @@ fn modifySplatCenter(center: ptr<function, vec3f>) {
 }
 
 fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
+    // normals are only consumed by the orb glow; skip the quat work when off.
+    if (uniform.uOrbIntensity <= 0.0 || uniform.uGlowFacing <= 0.0) { return; }
+
     // the gaussian's flattest axis (smallest scale) approximates the surface normal
     let s = (*scale);
     var axis: vec3f;
@@ -156,18 +176,28 @@ fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
     }
 
     if (uniform.uCutEnabled > 0.5) {
-        let toFocus = uniform.uCutFocusPos - uniform.uCutCamPos;
-        let focusDist = length(toFocus);
-        let dir = toFocus / max(focusDist, 0.0001);
-        let t = dot(center - uniform.uCutCamPos, dir);
-        let cutPlane = focusDist - uniform.uCutDist;
-        var fade = smoothstep(cutPlane - uniform.uCutSoft, cutPlane, t);
-
+        // peel the camera-facing wall(s) of the room box so you can see in.
         let roomCenter = (uniform.uRoomMin + uniform.uRoomMax) * 0.5;
         let roomHalf = (uniform.uRoomMax - uniform.uRoomMin) * 0.5;
-        let outsideVec = max(abs(center - roomCenter) - roomHalf, vec3f(0.0));
-        let outsideDist = length(outsideVec);
-        fade = fade * (1.0 - smoothstep(0.0, 0.6, outsideDist));
+
+        // only peel faces the camera is clearly outside of, and ramp the peel in
+        // smoothly over uCutEngage meters as the camera moves out (no hard pop).
+        // Below the 0.3m start it is fully off, so standing near a wall from the
+        // inside never peels.
+        let rel = uniform.uCutCamPos - roomCenter;
+        let engageEnd = 0.3 + max(uniform.uCutEngage, 0.001);
+        let camOutside = smoothstep(vec3f(0.3), vec3f(engageEnd), abs(rel) - roomHalf);
+        let camSign = sign(rel);
+
+        // each face has its own peel depth; pick the +/- side facing the camera.
+        // hide splats past the peel plane (the near face pulled inward by peel).
+        // take the strongest peel across the up-to-three faces the camera looks
+        // through; non-facing faces contribute 0 (multiplied out).
+        let peel = mix(uniform.uWallPeelNeg, uniform.uWallPeelPos, step(vec3f(0.0), rel));
+        let srel = center - roomCenter;
+        let beyond = (srel * camSign - (roomHalf - peel)) * camOutside;
+        let cut = max(beyond.x, max(beyond.y, beyond.z));
+        let fade = 1.0 - smoothstep(0.0, uniform.uCutSoft, cut);
 
         (*color) = vec4f((*color).rgb, (*color).a * fade);
     }
@@ -208,17 +238,18 @@ export class SplatFX {
      * @param {number}   p.orbRadius     - glow radius
      * @param {number}   p.cutEnabled    - 1/0 cutaway toggle
      * @param {number[]} p.cutCamPos     - cutaway camera position [x,y,z]
-     * @param {number[]} p.cutFocusPos   - cutaway focus position [x,y,z]
-     * @param {number}   p.cutDist       - cutaway keep distance
-     * @param {number}   p.cutSoft       - cutaway softness
+     * @param {number[]} p.wallPeelPos   - per-face peel depth for +X/+Y/+Z [x,y,z]
+     * @param {number[]} p.wallPeelNeg   - per-face peel depth for -X/-Y/-Z [x,y,z]
+     * @param {number}   p.cutSoft       - cutaway fade band
+     * @param {number}   p.cutEngage     - distance over which the peel fades in
      * @param {number[]} p.viewPos       - view position for normal-facing test [x,y,z]
      * @param {number}   p.glowFacing    - surface-facing glow weight
      */
     setParams(p) {
         const key = [
             ...p.orbPos, ...p.orbColor, p.orbIntensity, p.orbRadius,
-            p.cutEnabled, ...p.cutCamPos, ...p.cutFocusPos, p.cutDist, p.cutSoft,
-            ...p.viewPos, p.glowFacing
+            p.cutEnabled, ...p.cutCamPos, ...p.wallPeelPos, ...p.wallPeelNeg,
+            p.cutSoft, p.cutEngage, ...p.viewPos, p.glowFacing
         ].join(',');
         if (key === this._last) return false;
         this._last = key;
@@ -230,9 +261,10 @@ export class SplatFX {
         g.setParameter('uOrbRadius', p.orbRadius);
         g.setParameter('uCutEnabled', p.cutEnabled);
         g.setParameter('uCutCamPos', p.cutCamPos);
-        g.setParameter('uCutFocusPos', p.cutFocusPos);
-        g.setParameter('uCutDist', p.cutDist);
+        g.setParameter('uWallPeelPos', p.wallPeelPos);
+        g.setParameter('uWallPeelNeg', p.wallPeelNeg);
         g.setParameter('uCutSoft', p.cutSoft);
+        g.setParameter('uCutEngage', p.cutEngage);
         g.setParameter('uViewPos', p.viewPos);
         g.setParameter('uGlowFacing', p.glowFacing);
         return true;

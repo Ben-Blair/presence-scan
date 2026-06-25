@@ -29,6 +29,7 @@ import { SplatFX } from './splat-effects.js';
 import { OrbSources } from './orb-sources.js';
 import { WaypointCamera } from './waypoint-camera.js';
 import { SensorMinimap } from './sensor-minimap.js';
+import { SensorOverlay } from './sensor-overlay.js';
 import { createSettingsPanel } from './settings.js';
 import { isTypingInPanel } from './dom-utils.js';
 
@@ -155,10 +156,10 @@ function buildScene() {
     // ---------------------------------------------------------- splat fx
     const splatFX = new SplatFX(app, splat);
     splatFX.apply();
+    // the cutaway peel anchors to the near wall, so it needs the true wall line
+    // (a tiny margin keeps the wall surface splats themselves on the solid side)
     {
-        // expand the room box a little so wall/floor splats survive the
-        // dollhouse fade
-        const margin = 0.4;
+        const margin = 0.05;
         const min = worldAabb.getMin().clone();
         const max = worldAabb.getMax().clone();
         min.x -= margin; min.y -= margin; min.z -= margin;
@@ -216,7 +217,13 @@ function buildScene() {
     // you can confirm the sensor sees you and tracks accurately. Visible only
     // while the orb source is the sensor.
     const minimap = new SensorMinimap(sources, params);
+    sources.onStatusChange = () => minimap.wake();
     minimap.mount();
+
+    // In-scene gizmo of where the program thinks the sensor is (marker + facing
+    // + FOV cone) plus a live line to the tracked object, for visually fine-tuning
+    // the sensor placement against the scan.
+    const sensorOverlay = new SensorOverlay(app, params, orb, sources);
 
     // ---------------------------------------------------------- settings
     const hooks = {
@@ -237,9 +244,16 @@ function buildScene() {
             } else {
                 sources.disconnectSensor();
             }
+            minimap.wake();
         },
-        connectSensor: () => sources.connectSensor(),
-        disconnectSensor: () => sources.disconnectSensor(),
+        connectSensor: () => {
+            sources.connectSensor();
+            minimap.wake();
+        },
+        disconnectSensor: () => {
+            sources.disconnectSensor();
+            minimap.wake();
+        },
         frameOrb: () => controls.focus(orb.getPosition()),
         saveSession: saveCurrentSession,
         resetToDefaults: () => {
@@ -257,16 +271,24 @@ function buildScene() {
     wireHotkeys({ pane, controls, orb, captureAnchor, saveCurrentSession });
 
     // debug handle for console inspection
-    window.__viewer = { app, splat, camera, controls, orb, sources, autoCam, minimap, center, halfExtents, params };
+    window.__viewer = { app, splat, camera, controls, orb, sources, autoCam, minimap, sensorOverlay, center, halfExtents, params };
 
     // ---------------------------------------------------------- per-frame
-    const roomBox = new BoundingBox(center.clone(), halfExtents.clone());
+    // auto-cutaway engages only when the camera is clearly OUTSIDE the room, so
+    // moving around (or near a wall) inside never trips it. The box is inflated
+    // by an engage margin that matches the shader's own outside-face test.
+    const engageMargin = 0.3;
+    const roomBox = new BoundingBox(
+        center.clone(),
+        halfExtents.clone().add(new Vec3(engageMargin, engageMargin, engageMargin))
+    );
 
     const round = (v, step) => Math.round(v / step) * step;
 
     app.on('update', (dt) => {
         sources.update(dt);
         orb.update(dt, params.orb.smoothing);
+        sensorOverlay.update();
 
         // anchor follow mode: drive the camera automatically (suspends the
         // manual CameraControls while active)
@@ -290,9 +312,13 @@ function buildScene() {
             params.cutaway.mode === 'on' ||
             (params.cutaway.mode === 'auto' && outside));
 
-        // push shader uniforms (quantized; only re-renders splat when changed)
+        // push shader uniforms (quantized; only re-renders splat when changed).
+        // viewPos drives glow-facing only — coarsen it and freeze when unused so
+        // camera motion doesn't trigger a gsplat resort every frame.
+        const glowFacingOn = params.orb.glowIntensity > 0 && params.orb.glowFacing > 0;
+        const orbStep = params.source.mode === 'click' ? 0.01 : 0.02;
         splatFX.setParams({
-            orbPos: [round(orbPos.x, 0.01), round(orbPos.y, 0.01), round(orbPos.z, 0.01)],
+            orbPos: [round(orbPos.x, orbStep), round(orbPos.y, orbStep), round(orbPos.z, orbStep)],
             orbColor: [params.orb.color.r, params.orb.color.g, params.orb.color.b],
             orbIntensity: params.orb.glowIntensity,
             orbRadius: params.orb.glowRadius,
@@ -302,14 +328,13 @@ function buildScene() {
                 cutOn ? round(camPos.y, 0.03) : 0,
                 cutOn ? round(camPos.z, 0.03) : 0
             ],
-            cutFocusPos: [
-                cutOn ? round(orbPos.x, 0.03) : 0,
-                cutOn ? round(orbPos.y, 0.03) : 0,
-                cutOn ? round(orbPos.z, 0.03) : 0
-            ],
-            cutDist: params.cutaway.distance,
+            wallPeelPos: [params.cutaway.wallPeels.xPos, params.cutaway.wallPeels.yPos, params.cutaway.wallPeels.zPos],
+            wallPeelNeg: [params.cutaway.wallPeels.xNeg, params.cutaway.wallPeels.yNeg, params.cutaway.wallPeels.zNeg],
             cutSoft: params.cutaway.softness,
-            viewPos: [round(camPos.x, 0.01), round(camPos.y, 0.01), round(camPos.z, 0.01)],
+            cutEngage: params.cutaway.engage,
+            viewPos: glowFacingOn
+                ? [round(camPos.x, 0.05), round(camPos.y, 0.05), round(camPos.z, 0.05)]
+                : [0, 0, 0],
             glowFacing: params.orb.glowFacing
         });
     });
