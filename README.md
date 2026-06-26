@@ -1,8 +1,12 @@
 # Garage Splat Viewer
 
-Interactive 3D viewer for the garage gaussian splat, built on the PlayCanvas engine.
-Walk around the scan, place a glowing location orb (ready for an HLK mmWave sensor
-feed), and cut walls away when viewing from outside.
+Interactive 3D viewer for a gaussian-splat scan of my garage, built on PlayCanvas.
+Walk the scan, track people with a live mmWave radar as glowing orbs, and cut walls
+away when viewing from outside.
+
+<video src="https://github.com/Ben-Blair/garage-splat-viewer/raw/main/docs/demo.mp4" controls muted playsinline width="100%">
+  <a href="docs/demo.mp4">Download demo video</a>
+</video>
 
 ## Run
 
