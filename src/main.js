@@ -18,6 +18,7 @@ import {
     KEY_H,
     KEY_O,
     KEY_P,
+    KEY_V,
     RESOLUTION_AUTO
 } from 'playcanvas';
 import { CameraControls } from './camera-controls.js';
@@ -270,11 +271,16 @@ function buildScene() {
     };
     const pane = createSettingsPanel(params, hooks);
 
+    // ---------------------------------------------------------- display mode
+    // a clean presentation view that hides every on-screen overlay (panel,
+    // minimap, help, in-scene sensor gizmo), leaving just the splat + orb.
+    const displayMode = createDisplayToggle();
+
     // ---------------------------------------------------------- hotkeys
-    wireHotkeys({ pane, controls, orb, captureAnchor, saveCurrentSession });
+    wireHotkeys({ pane, controls, orb, displayMode, captureAnchor, saveCurrentSession });
 
     // debug handle for console inspection
-    window.__viewer = { app, splat, camera, controls, orb, field, sources, autoCam, minimap, sensorOverlay, center, halfExtents, params };
+    window.__viewer = { app, splat, camera, controls, orb, field, sources, autoCam, minimap, sensorOverlay, displayMode, center, halfExtents, params };
 
     // ---------------------------------------------------------- per-frame
     // auto-cutaway engages only when the camera is clearly OUTSIDE the room, so
@@ -291,7 +297,7 @@ function buildScene() {
     app.on('update', (dt) => {
         sources.update(dt);
         field.update(dt, params.orb.smoothing);
-        sensorOverlay.update();
+        if (!displayMode.on) sensorOverlay.update();
 
         // anchor follow mode: drive the camera automatically (suspends the
         // manual CameraControls while active)
@@ -409,12 +415,39 @@ function generateDefaultAnchors(center, halfExtents) {
     }));
 }
 
+/**
+ * Build the floating "display mode" toggle. Display mode hides every on-screen
+ * overlay (settings panel, minimap, help, in-scene sensor gizmo) for a clean
+ * presentation/kiosk view. Returns an object whose `on` flag the update loop
+ * reads to suppress the in-scene overlay (CSS handles the DOM chrome).
+ */
+function createDisplayToggle() {
+    const state = { on: false };
+    const fab = document.createElement('button');
+    fab.className = 'display-fab';
+    fab.title = 'Display mode — hide controls (V)';
+    fab.setAttribute('aria-label', 'Toggle display mode');
+    fab.textContent = '🖥';
+    const toggle = () => {
+        state.on = !state.on;
+        document.body.classList.toggle('display-mode', state.on);
+        fab.title = state.on
+            ? 'Exit display mode — show controls (V)'
+            : 'Display mode — hide controls (V)';
+    };
+    fab.addEventListener('click', toggle);
+    document.body.appendChild(fab);
+    return Object.assign(state, { element: fab, toggle });
+}
+
 /** Wire the global keyboard shortcuts. */
-function wireHotkeys({ pane, controls, orb, captureAnchor, saveCurrentSession }) {
+function wireHotkeys({ pane, controls, orb, displayMode, captureAnchor, saveCurrentSession }) {
     app.keyboard.on(EVENT_KEYDOWN, (e) => {
         if (isTypingInPanel()) return;
         if (e.key === KEY_P) {
             pane.toggle();
+        } else if (e.key === KEY_V) {
+            displayMode.toggle();
         } else if (e.key === KEY_F) {
             controls.focus(orb.getPosition());
         } else if (e.key === KEY_O) {

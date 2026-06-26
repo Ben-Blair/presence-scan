@@ -338,3 +338,38 @@
 }
 .radar-minimap--on { display: block; }
 .radar-minimap canvas { display: block; }
+
+/* Display mode ------------------------------------------------------- */
+/* Clean presentation view: hide every on-screen overlay so only the splat
+   (and the orb) remain. Toggled from main.js via a body class. */
+body.display-mode #help,
+body.display-mode .cp,
+body.display-mode .cp-fab,
+body.display-mode .radar-minimap { display: none !important; }
+
+.display-fab {
+    position: fixed;
+    right: 12px;
+    bottom: 12px;
+    z-index: 65;
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 17px;
+    color: var(--cp-accent, #8fd0ff);
+    background: rgba(12, 13, 20, 0.72);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.1s ease, opacity 0.25s ease;
+}
+.display-fab:hover { background: rgba(25, 160, 255, 0.2); }
+.display-fab:active { transform: scale(0.94); }
+/* In display mode the toggle stays reachable but recedes until hovered. */
+body.display-mode .display-fab { opacity: 0.12; }
+body.display-mode .display-fab:hover { opacity: 1; }
