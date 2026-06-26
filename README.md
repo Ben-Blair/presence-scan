@@ -13,8 +13,8 @@ npm run dev
 
 Open the printed URL (default http://localhost:5173).
 
-`npm run dev` starts the Vite viewer (`dev:vite-only` is a synonym). The sensor
-feed comes straight from the ESP device — there is no Node bridge to run.
+`npm run dev` starts the Vite viewer. The sensor feed comes straight from the ESP
+device — there is no Node bridge to run.
 
 ## mmWave sensor (HLK LD2450)
 

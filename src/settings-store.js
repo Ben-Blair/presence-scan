@@ -6,10 +6,6 @@ const STORAGE_KEY = 'garage-viewer-settings';
 /** @typedef {typeof defaults.params} ParamSettings */
 /** @typedef {{ view: ViewSettings, params: ParamSettings }} ViewerSettings */
 
-function deepClone(value) {
-    return JSON.parse(JSON.stringify(value));
-}
-
 function deepAssign(target, source) {
     for (const key of Object.keys(source)) {
         const src = source[key];
@@ -24,7 +20,7 @@ function deepAssign(target, source) {
 
 /** Shipped defaults from defaults.json. */
 export const defaultView = defaults.view;
-export const defaultParams = deepClone(defaults.params);
+export const defaultParams = structuredClone(defaults.params);
 
 function readSession() {
     try {
@@ -48,7 +44,7 @@ function readSession() {
 /** Params + view to use on startup (session override, else defaults.json). */
 export function resolveStartup() {
     const session = readSession();
-    const params = deepClone(defaults.params);
+    const params = structuredClone(defaults.params);
     if (session?.params) {
         deepAssign(params, session.params);
     }
@@ -72,7 +68,7 @@ export function saveSession(view, liveParams) {
                 ? { x: view.orb.x, y: view.orb.y, z: view.orb.z }
                 : undefined
         },
-        params: deepClone(liveParams)
+        params: structuredClone(liveParams)
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     return data;
@@ -86,5 +82,5 @@ export function clearSession() {
 export function resetToDefaults(liveParams) {
     clearSession();
     deepAssign(liveParams, defaultParams);
-    return deepClone(defaultView);
+    return structuredClone(defaultView);
 }
