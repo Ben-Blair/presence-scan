@@ -5,7 +5,8 @@
 // change externally, e.g. reset / hotkey), and optionally a "poll" callback for
 // live readouts. A control fires its `onChange` after mutating params.
 
-const FOCUSABLE = ['INPUT', 'SELECT', 'TEXTAREA'];
+import { FOCUSABLE } from './dom-utils.js';
+
 const hasFocus = (el) => document.activeElement === el && FOCUSABLE.includes(el.tagName);
 
 function clampNum(v, min, max) {
@@ -41,6 +42,28 @@ function makeRow(parent, label) {
     return row;
 }
 
+/**
+ * Wire one or more DOM inputs to a params field: on `event`, run `onInput` (which
+ * writes params from the DOM) then fire `onChange`; and register a focus-guarded
+ * refresher that runs `read` (which pulls params back into the DOM) when none of
+ * the inputs is being actively edited. Collapses the near-identical write-back +
+ * refresher boilerplate every control used to repeat.
+ *
+ * @param {{refreshers: Array<() => void>}} ctx
+ * @param {HTMLElement | HTMLElement[]} inputs
+ * @param {{event: string, onInput: (el: any) => void, read: () => void, onChange?: () => void}} cfg
+ */
+function bindInput(ctx, inputs, { event, onInput, read, onChange }) {
+    const list = Array.isArray(inputs) ? inputs : [inputs];
+    for (const input of list) {
+        input.addEventListener(event, () => { onInput(input); onChange?.(); });
+    }
+    ctx.refreshers.push(() => {
+        if (list.some(hasFocus)) return;
+        read();
+    });
+}
+
 // Returns a section/panel "scope" with row-factory methods that append to `body`.
 function makeScope(body, ctx) {
     const scope = {
@@ -62,23 +85,18 @@ function makeScope(body, ctx) {
             num.min = min; num.max = max; num.step = step;
 
             const fmtNum = (v) => (format ? format(v) : v);
-            const write = (v) => {
-                const val = clampNum(v, min, max);
-                obj[key] = val;
-                range.value = String(val);
-                num.value = fmtNum(val);
-                onChange && onChange();
-            };
-            range.addEventListener('input', () => write(parseFloat(range.value)));
-            num.addEventListener('input', () => write(parseFloat(num.value)));
-
-            ctx.refreshers.push(() => {
-                if (hasFocus(range) || hasFocus(num)) return;
-                range.value = String(obj[key]);
-                num.value = fmtNum(obj[key]);
+            const sync = (val) => { range.value = String(val); num.value = fmtNum(val); };
+            bindInput(ctx, [range, num], {
+                event: 'input',
+                onInput: (input) => {
+                    const val = clampNum(parseFloat(input.value), min, max);
+                    obj[key] = val;
+                    sync(val);
+                },
+                read: () => sync(obj[key]),
+                onChange
             });
-            range.value = String(obj[key]);
-            num.value = fmtNum(obj[key]);
+            sync(obj[key]);
             return scope;
         },
 
@@ -88,14 +106,14 @@ function makeScope(body, ctx) {
             const input = el('input', 'cp-color', row);
             input.type = 'color';
             input.value = floatRgbToHex(obj[key]);
-            input.addEventListener('input', () => {
-                const c = hexToFloatRgb(input.value);
-                obj[key].r = c.r; obj[key].g = c.g; obj[key].b = c.b;
-                onChange && onChange();
-            });
-            ctx.refreshers.push(() => {
-                if (hasFocus(input)) return;
-                input.value = floatRgbToHex(obj[key]);
+            bindInput(ctx, input, {
+                event: 'input',
+                onInput: () => {
+                    const c = hexToFloatRgb(input.value);
+                    obj[key].r = c.r; obj[key].g = c.g; obj[key].b = c.b;
+                },
+                read: () => { input.value = floatRgbToHex(obj[key]); },
+                onChange
             });
             return scope;
         },
@@ -108,11 +126,12 @@ function makeScope(body, ctx) {
             input.type = 'checkbox';
             input.checked = !!obj[key];
             el('span', 'cp-switch__track', sw);
-            input.addEventListener('change', () => {
-                obj[key] = input.checked;
-                onChange && onChange();
+            bindInput(ctx, input, {
+                event: 'change',
+                onInput: () => { obj[key] = input.checked; },
+                read: () => { input.checked = !!obj[key]; },
+                onChange
             });
-            ctx.refreshers.push(() => { input.checked = !!obj[key]; });
             return scope;
         },
 
@@ -126,13 +145,11 @@ function makeScope(body, ctx) {
                 o.textContent = name;
             }
             sel.value = String(obj[key]);
-            sel.addEventListener('change', () => {
-                obj[key] = sel.value;
-                onChange && onChange();
-            });
-            ctx.refreshers.push(() => {
-                if (hasFocus(sel)) return;
-                sel.value = String(obj[key]);
+            bindInput(ctx, sel, {
+                event: 'change',
+                onInput: () => { obj[key] = sel.value; },
+                read: () => { sel.value = String(obj[key]); },
+                onChange
             });
             return scope;
         },
@@ -143,11 +160,11 @@ function makeScope(body, ctx) {
             const input = el('input', 'cp-text', row);
             input.type = 'text';
             input.value = obj[key];
-            const write = () => { obj[key] = input.value; onChange && onChange(); };
-            input.addEventListener('change', write);
-            ctx.refreshers.push(() => {
-                if (hasFocus(input)) return;
-                input.value = obj[key];
+            bindInput(ctx, input, {
+                event: 'change',
+                onInput: () => { obj[key] = input.value; },
+                read: () => { input.value = obj[key]; },
+                onChange
             });
             return scope;
         },
@@ -174,6 +191,11 @@ function makeScope(body, ctx) {
     return scope;
 }
 
+/**
+ * @param {HTMLElement} parent
+ * @param {{ refreshers: Array<() => void>, polls: Array<() => void> }} ctx
+ * @param {{ title?: string, expanded?: boolean }} [opts]
+ */
 function buildSection(parent, ctx, { title, expanded = true } = {}) {
     const section = el('section', 'cp-sec', parent);
     if (!expanded) section.classList.add('cp-sec--collapsed');
@@ -188,7 +210,9 @@ function buildSection(parent, ctx, { title, expanded = true } = {}) {
     return makeScope(secBody, ctx);
 }
 
+/** @param {{ title?: string, onHide?: () => void }} [opts] */
 export function createPanel({ title, onHide } = {}) {
+    /** @type {{ refreshers: Array<() => void>, polls: Array<() => void> }} */
     const ctx = { refreshers: [], polls: [] };
 
     const element = el('aside', 'cp');

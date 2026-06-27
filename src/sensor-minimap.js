@@ -9,6 +9,9 @@
  * Self-contained: it owns a DOM canvas and its own requestAnimationFrame loop,
  * and only reads from the shared OrbSources (`lastTargets`, `sensorStatus`).
  */
+import { clamp, DEG_TO_RAD, RAD_TO_DEG } from './math-utils.js';
+import { HALF_FOV_DEG, MAX_RANGE_M, SAMPLE_STALE_MS, SLOT_HEX, SLOT_RGB } from './sensor-config.js';
+
 export class SensorMinimap {
     /**
      * @param {import('./orb-sources.js').OrbSources} sources
@@ -18,9 +21,9 @@ export class SensorMinimap {
         this.sources = sources;
         this.params = params;
 
-        // LD2450: ~120° field of view, 6 m nominal range.
-        this.maxRangeM = 6;
-        this.halfFovDeg = 60;
+        // LD2450: ~120° field of view, 6 m nominal range (see sensor-config.js).
+        this.maxRangeM = MAX_RANGE_M;
+        this.halfFovDeg = HALF_FOV_DEG;
 
         this.cssW = 240;
         this.cssH = 220;
@@ -32,8 +35,8 @@ export class SensorMinimap {
         this.trailMs = 1100;
         this.lastSeen = [];      // per-slot sources.lastTargets[i].t last ingested
         // one colour per target slot (matches the up-to-three orbs)
-        this.palette = ['#ff5a5a', '#ffb14a', '#49e0a0'];
-        this.trailRGB = [[255, 90, 90], [255, 177, 74], [73, 224, 160]];
+        this.palette = SLOT_HEX;
+        this.trailRGB = SLOT_RGB;
         this._raf = 0;
         this._running = false;
 
@@ -42,7 +45,9 @@ export class SensorMinimap {
         this.canvas = document.createElement('canvas');
         this.el.appendChild(this.canvas);
 
-        this.ctx = this.canvas.getContext('2d');
+        const ctx = this.canvas.getContext('2d');
+        if (!ctx) throw new Error('SensorMinimap: 2D canvas context unavailable');
+        this.ctx = ctx;
         this._sizeCanvas();
     }
 
@@ -86,7 +91,7 @@ export class SensorMinimap {
         // (connecting/connected) so the radar appears the moment you Connect.
         const st = this.sources.sensorStatus;
         const visible = this.params.source.mode === 'sensor' ||
-            st === 'connected' || st === 'connecting…';
+            st === 'connected' || st === 'connecting…' || st === 'reconnecting…';
         this.el.classList.toggle('radar-minimap--on', visible);
         if (!visible) {
             this._stop();
@@ -101,13 +106,13 @@ export class SensorMinimap {
         for (let i = 0; i < samples.length; i++) {
             const s = samples[i];
             if (s.x === 0 && s.y === 0) continue;
-            if (now - s.t >= 1500) continue;
+            if (now - s.t >= SAMPLE_STALE_MS) continue;
             const mx = s.x / 1000; // lateral metres (raw, +x = right)
             const my = s.y / 1000; // distance metres (forward)
             targets.push({
                 mx, my, slot: i,
                 dist: Math.hypot(mx, my),
-                angle: Math.atan2(mx, my) * 180 / Math.PI // 0 = straight ahead
+                angle: Math.atan2(mx, my) * RAD_TO_DEG // 0 = straight ahead
             });
             if (!this.trails[i]) this.trails[i] = [];
             if (s.t !== this.lastSeen[i]) {
@@ -142,7 +147,7 @@ export class SensorMinimap {
         const ox = W / 2;
         const oy = this.originY;
         const R = this.R;
-        const hRad = (this.halfFovDeg * Math.PI) / 180;
+        const hRad = this.halfFovDeg * DEG_TO_RAD;
         const down = Math.PI / 2;
 
         ctx.clearRect(0, 0, W, H);
@@ -228,8 +233,8 @@ export class SensorMinimap {
             const [r, g, b] = this.trailRGB[target.slot % this.trailRGB.length];
             const p = this._toPixels(target.mx, target.my);
             // clamp the glyph inside the canvas if the target overruns the range
-            const px = Math.max(8, Math.min(W - 8, p.x));
-            const py = Math.max(oy, Math.min(H - this.bottomPad, p.y));
+            const px = clamp(p.x, 8, W - 8);
+            const py = clamp(p.y, oy, H - this.bottomPad);
             ctx.beginPath();
             ctx.arc(px, py, 9, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.18)`;

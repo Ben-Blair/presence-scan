@@ -32,8 +32,11 @@ static const uint32_t RADAR_BAUD   = 256000;
 // LD2450 frame layout.
 static const uint8_t  FRAME_HEAD[4] = { 0xAA, 0xFF, 0x03, 0x00 };
 static const uint8_t  FRAME_TAIL[2] = { 0x55, 0xCC };
+static const size_t   TARGET_LEN    = 8;   // bytes per target (x,y,speed,res)
 static const size_t   FRAME_LEN     = 30;  // 4 head + 3*8 targets + 2 tail
-static const size_t   PAYLOAD_LEN   = 24;  // 3 targets * 8 bytes
+
+// Reboot rather than hang forever if WiFi won't come up at boot.
+static const uint32_t WIFI_TIMEOUT_MS = 20000;
 
 WebSocketsServer webSocket(81);
 
@@ -56,7 +59,7 @@ static void broadcastFrame(const uint8_t* payload) {
 
     bool first = true;
     for (int t = 0; t < 3; t++) {
-        const uint8_t* b = payload + t * 8;
+        const uint8_t* b = payload + t * TARGET_LEN;
         int16_t x = decodeSigned(b[0], b[1]);
         int16_t y = decodeSigned(b[2], b[3]);
         int16_t speed = decodeSigned(b[4], b[5]);
@@ -94,7 +97,7 @@ static void pumpRadar() {
         frame[have++] = byte;
         if (have == FRAME_LEN) {
             have = 0;
-            if (frame[28] == FRAME_TAIL[0] && frame[29] == FRAME_TAIL[1]) {
+            if (frame[FRAME_LEN - 2] == FRAME_TAIL[0] && frame[FRAME_LEN - 1] == FRAME_TAIL[1]) {
                 broadcastFrame(frame + 4);
             }
             // bad tail -> drop and resync on the next header
@@ -117,9 +120,15 @@ static void connectWifi() {
     WiFi.setSleep(false);  // keep the radio awake so the feed streams smoothly
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     Serial.print("[wifi] connecting");
+    const uint32_t start = millis();
     while (WiFi.status() != WL_CONNECTED) {
         delay(250);
         Serial.print('.');
+        if (millis() - start > WIFI_TIMEOUT_MS) {
+            // AP down at boot — reboot and retry instead of hanging in setup()
+            Serial.println("\n[wifi] timeout, restarting");
+            ESP.restart();
+        }
     }
     Serial.printf("\n[wifi] %s\n", WiFi.localIP().toString().c_str());
 }

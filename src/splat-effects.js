@@ -10,6 +10,11 @@
 //     Because it peels by face (not a single angled plane) the whole near wall
 //     clears even when you view it off-center. When the camera is inside the box
 //     no face qualifies, so nothing is culled.
+//
+// The GLSL and WGSL chunks below are deliberate hand-kept-in-sync translations of
+// the same logic (PlayCanvas picks one per backend). Any change to the glow or
+// cutaway math must be made in BOTH — a codegen layer would add more complexity
+// than the two ~100-line bodies are worth.
 
 const GLSL = /* glsl */`
 uniform vec3 uOrbPos0;       // up to three orb positions (one per tracked person)

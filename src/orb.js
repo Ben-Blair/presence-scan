@@ -4,6 +4,7 @@ import {
     Color,
     Vec3
 } from 'playcanvas';
+import { smoothFactor } from './math-utils.js';
 
 /**
  * The glowing location orb: an emissive core sphere (writes depth, so splats
@@ -27,7 +28,7 @@ export class Orb {
 
         this.core = new Entity('orb-core');
         this.core.addComponent('render', { type: 'sphere' });
-        this.core.render.meshInstances.forEach(mi => (mi.material = this.coreMaterial));
+        this.core.render?.meshInstances.forEach(mi => (mi.material = this.coreMaterial));
         this.entity.addChild(this.core);
 
         app.root.addChild(this.entity);
@@ -61,7 +62,7 @@ export class Orb {
     /** Per-frame: smooth movement toward the target. */
     update(dt, smoothing) {
         const pos = this.entity.getPosition();
-        const t = 1 - Math.exp(-smoothing * dt);
+        const t = smoothFactor(smoothing, dt);
         const nx = pos.x + (this.target.x - pos.x) * t;
         const ny = pos.y + (this.target.y - pos.y) * t;
         const nz = pos.z + (this.target.z - pos.z) * t;

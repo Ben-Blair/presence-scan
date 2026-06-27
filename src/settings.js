@@ -2,13 +2,27 @@ import './panel.css';
 import { createPanel } from './panel-controls.js';
 
 /**
+ * Callbacks main.js wires into the panel. Declared here so the panel and main.js
+ * can't silently drift out of sync (checkJs validates the object main.js passes).
+ *
+ * @typedef {Object} PanelHooks
+ * @property {import('./orb-sources.js').OrbSources} sources - for the status readout
+ * @property {(i: number) => void} captureAnchor
+ * @property {() => void} onOrbChanged
+ * @property {() => void} onCameraChanged
+ * @property {() => void} onSourceModeChanged
+ * @property {() => void} connectSensor
+ * @property {() => void} disconnectSensor
+ * @property {() => void} frameOrb
+ * @property {() => void} saveSession
+ * @property {() => void} resetToDefaults
+ */
+
+/**
  * Builds the custom settings panel bound to the shared params object.
  *
  * @param {*} params - the shared params object
- * @param {*} hooks - callbacks: onOrbChanged(), onCameraChanged(),
- *                    onSourceModeChanged(), connectSensor(), disconnectSensor(), frameOrb(),
- *                    captureAnchor(i), saveSession(), resetToDefaults(),
- *                    and sources (for the sensor status readout)
+ * @param {PanelHooks} hooks - callbacks into main.js
  * @returns {{ element: HTMLElement, refresh: () => void, toggle: () => void }}
  */
 export function createSettingsPanel(params, hooks) {
@@ -94,6 +108,7 @@ export function createSettingsPanel(params, hooks) {
         onChange: () => hooks.onSourceModeChanged()
     });
     src.addSlider(params.source, 'demoSpeed', { min: 0.05, max: 2, step: 0.05, label: 'demo speed' });
+    src.addSlider(params.source, 'keyboardSpeed', { min: 0.5, max: 8, step: 0.5, label: 'arrow-key speed' });
     src.addSlider(params.source, 'floorY', { min: -5, max: 5, step: 0.01, label: 'floor height' });
 
     const sensor = src.addSection({ title: 'HLK mmWave (WebSocket)', expanded: false });

@@ -34,9 +34,9 @@ import { SensorOverlay } from './sensor-overlay.js';
 import { createSettingsPanel } from './settings.js';
 import { isTypingInPanel } from './dom-utils.js';
 
-const canvas = document.getElementById('app-canvas');
-const loadingEl = document.getElementById('loading');
-const progressEl = document.getElementById('loading-progress');
+const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('app-canvas'));
+const loadingEl = /** @type {HTMLElement} */ (document.getElementById('loading'));
+const progressEl = /** @type {HTMLElement} */ (document.getElementById('loading-progress'));
 
 const app = new Application(canvas, {
     mouse: new Mouse(canvas),
@@ -76,7 +76,8 @@ for (const key in assets) {
     });
     asset.on('error', (err) => {
         console.error(`Failed to load ${key}:`, err);
-        loadingEl.querySelector('.label').textContent = `Failed to load ${key} — see console`;
+        const label = loadingEl.querySelector('.label');
+        if (label) label.textContent = `Failed to load ${key} — see console`;
     });
     app.assets.add(asset);
     app.assets.load(asset);
@@ -106,12 +107,13 @@ function buildScene() {
     // the collision mesh gives the true room bounds (the raw splat AABB is
     // bloated by floater outliers); it's only used for measurement, never
     // rendered.
-    const collisionMesh = assets.collision.resource.instantiateRenderEntity();
+    const collisionMesh = /** @type {any} */ (assets.collision.resource).instantiateRenderEntity();
     app.root.addChild(collisionMesh);
     let worldAabb = deriveRoomBounds(collisionMesh);
     if (!worldAabb) {
         worldAabb = new BoundingBox();
-        worldAabb.setFromTransformedAabb(assets.garage.resource.aabb, splat.getWorldTransform());
+        worldAabb.setFromTransformedAabb(
+            /** @type {any} */ (assets.garage.resource).aabb, splat.getWorldTransform());
     }
     collisionMesh.destroy();
     const center = worldAabb.center.clone();
@@ -146,7 +148,9 @@ function buildScene() {
     camera.setPosition(spawnEye);
 
     camera.addComponent('script');
-    const controls = camera.script.create(CameraControls, {
+    // CameraControls is a custom ScriptType; treat the instance as loosely typed
+    // so its bespoke props (reset/focus/moveSpeed/…) don't trip the base ScriptType.
+    const controls = /** @type {any} */ (camera.script).create(CameraControls, {
         properties: {
             moveSpeed: params.camera.moveSpeed,
             moveFastSpeed: params.camera.moveFastSpeed,
@@ -245,7 +249,7 @@ function buildScene() {
             controls.moveSpeed = params.camera.moveSpeed;
             controls.moveFastSpeed = params.camera.moveFastSpeed;
             controls.rotateSpeed = params.camera.rotateSpeed;
-            camera.camera.fov = params.camera.fov;
+            /** @type {any} */ (camera.camera).fov = params.camera.fov;
             app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio, params.camera.renderScale);
             app.resizeCanvas();
         },
@@ -450,7 +454,7 @@ function createDisplayToggle() {
 
 /** Wire the global keyboard shortcuts. */
 function wireHotkeys({ pane, controls, orb, displayMode, captureAnchor, saveCurrentSession }) {
-    app.keyboard.on(EVENT_KEYDOWN, (e) => {
+    app.keyboard?.on(EVENT_KEYDOWN, (e) => {
         if (isTypingInPanel()) return;
         if (e.key === KEY_P) {
             pane.toggle();

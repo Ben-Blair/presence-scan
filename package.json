@@ -1,15 +1,32 @@
 {
   "name": "garage-splat-viewer",
   "version": "1.0.0",
+  "description": "Browser-based 3D gaussian-splat viewer of a garage, driven live by an HLK/LD2450 mmWave radar so a person walking the real room appears as a glowing orb in the scan.",
   "private": true,
   "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "typecheck": "tsc -p jsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "playcanvas": "^2.19.7",
     "vite": "^8.0.16"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "eslint": "^9.18.0",
+    "globals": "^15.14.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.8"
   }
 }

@@ -20,6 +20,17 @@ Open the printed URL (default http://localhost:5173).
 `npm run dev` starts the Vite viewer. The sensor feed comes straight from the ESP
 device — there is no Node bridge to run.
 
+### Checks
+
+```bash
+npm run lint        # eslint
+npm run typecheck   # tsc --checkJs (JSDoc types, no .ts sources)
+npm test            # vitest unit tests
+```
+
+Lint, type-check, and tests run in CI on every push/PR and gate the GitHub Pages
+deploy (`.github/workflows/`).
+
 ## mmWave sensor (HLK LD2450)
 
 The radar runs **custom ESP32 firmware** (`firmware/garage-radar/`) that parses
