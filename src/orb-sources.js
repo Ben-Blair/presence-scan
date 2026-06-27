@@ -150,8 +150,18 @@ export class OrbSources {
             const t = this.demoTime;
             const c = this.roomBounds.center;
             const he = this.roomBounds.halfExtents;
-            const x = c.x + Math.sin(t) * he.x * 0.55;
-            const z = c.z + Math.sin(t * 0.63 + 1.3) * he.z * 0.55;
+            const wp = this.params.cutaway.wallPeels;
+            const margin = 0.15;
+            const innerMinX = c.x - he.x + (wp.xNeg ?? 0) + margin;
+            const innerMaxX = c.x + he.x - (wp.xPos ?? 0) - margin;
+            const innerMinZ = c.z - he.z + (wp.zNeg ?? 0) + margin;
+            const innerMaxZ = c.z + he.z - (wp.zPos ?? 0) - margin;
+            const midX = (innerMinX + innerMaxX) * 0.5;
+            const halfX = (innerMaxX - innerMinX) * 0.5;
+            const midZ = (innerMinZ + innerMaxZ) * 0.5;
+            const halfZ = (innerMaxZ - innerMinZ) * 0.5;
+            const x = midX + Math.sin(t) * halfX;
+            const z = midZ + Math.sin(t * 0.63 + 1.3) * halfZ;
             const y = this.params.source.floorY + this.params.orb.height;
             this.field.primary().setTarget(tmpOrbPos.set(x, y, z));
         } else if (this.params.source.mode === 'click') {
