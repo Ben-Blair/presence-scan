@@ -113,6 +113,7 @@ export function createSettingsPanel(params, hooks) {
     // (The sensor's own depth is metric — leave 'scale' at its mm→m default.)
     sensor.addToggle(params.source.sensor, 'showOverlay', { label: 'show sensor overlay' });
     sensor.addSlider(params.source.sensor, 'mountHeight', { min: 0, max: 4, step: 0.05, label: 'mount height' });
+    sensor.addSlider(params.source.sensor, 'mountTilt', { min: 0, max: 60, step: 1, label: 'mount tilt (° down)' });
 
     document.body.appendChild(panel.element);
     document.body.appendChild(fab);

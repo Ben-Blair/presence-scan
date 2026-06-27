@@ -61,7 +61,8 @@
         "scale": 0.001,
         "flipSensorY": false,
         "showOverlay": true,
-        "mountHeight": 1.6
+        "mountHeight": 1.6,
+        "mountTilt": 0
       }
     }
   }

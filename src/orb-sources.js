@@ -131,8 +131,12 @@ export class OrbSources {
         const s = this.params.source.sensor;
         const syf = s.flipSensorY ? -sy : sy; // mirror lateral axis if calibrated so
         const rad = (s.rotationDeg * Math.PI) / 180;
+        // A downward mount tilt means the sensor's forward axis is its slant range,
+        // not horizontal ground distance. Project it onto the floor (X is the tilt
+        // axis, so it stays true) — otherwise far targets read too far out.
+        const tilt = ((s.mountTilt || 0) * Math.PI) / 180;
         const mx = sx * s.scale;
-        const mz = syf * s.scale;
+        const mz = syf * s.scale * Math.cos(tilt);
         const wx = s.originX + mx * Math.cos(rad) - mz * Math.sin(rad);
         const wz = s.originZ + mx * Math.sin(rad) + mz * Math.cos(rad);
         const wy = this.params.source.floorY + this.params.orb.height;
