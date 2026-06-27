@@ -1,23 +1,23 @@
 {
   "view": {
-    "position": { "x": -2.722, "y": 1.780, "z": 1.770 },
-    "focus": { "x": -0.621, "y": 0.572, "z": 0.718 },
-    "orb": { "x": -0.985, "y": 0.352, "z": 0.014 }
+    "position": { "x": 1.569, "y": 1.534, "z": 2.769 },
+    "focus": { "x": 0, "y": 0, "z": 0 },
+    "orb": { "x": -0.779, "y": 0.352, "z": 0.807 }
   },
   "params": {
     "orb": {
       "color": { "r": 0.25, "g": 0.65, "b": 1.0 },
       "size": 0.12,
       "coreBrightness": 2.0,
-      "glowIntensity": 1.0,
-      "glowRadius": 1.2,
+      "glowIntensity": 1.9,
+      "glowRadius": 0.75,
       "glowFacing": 1.0,
       "height": 0.9,
-      "smoothing": 6.0
+      "smoothing": 8.5
     },
     "camera": {
-      "orbitOrb": false,
-      "fov": 75,
+      "orbitOrb": true,
+      "fov": 66,
       "moveSpeed": 2.5,
       "moveFastSpeed": 7,
       "rotateSpeed": 0.25,
@@ -27,17 +27,38 @@
         "lookSmoothing": 4.0,
         "parkBias": 0.6,
         "heightOffset": 0,
-        "deadzoneFrac": 0.25,
-        "minOrbDistance": 1.0
+        "deadzoneFrac": 0.6,
+        "minOrbDistance": 2.1
       },
-      "anchors": []
+      "anchors": [
+        {
+          "name": "NW",
+          "box": { "minX": -4.443, "minZ": -4.112, "maxX": 0.411, "maxZ": 0.011 },
+          "eye": { "x": 1.569, "y": 1.534, "z": 2.769 }
+        },
+        {
+          "name": "NE",
+          "box": { "minX": 0.411, "minZ": -4.112, "maxX": 5.266, "maxZ": 0.011 },
+          "eye": { "x": -2.244, "y": 1.923, "z": -2.260 }
+        },
+        {
+          "name": "SW",
+          "box": { "minX": -4.443, "minZ": 0.011, "maxX": 0.411, "maxZ": 4.134 },
+          "eye": { "x": -2.067, "y": 1.320, "z": 2.002 }
+        },
+        {
+          "name": "SE",
+          "box": { "minX": 0.411, "minZ": 0.011, "maxX": 5.266, "maxZ": 4.134 },
+          "eye": { "x": 1.384, "y": 1.566, "z": -2.282 }
+        }
+      ]
     },
     "cutaway": {
       "mode": "auto",
       "wallPeels": {
-        "xPos": 0.5, "xNeg": 0.5,
-        "yPos": 0.5, "yNeg": 0.5,
-        "zPos": 0.5, "zNeg": 0.5
+        "xPos": 4.6, "xNeg": 2.9,
+        "yPos": 4.7, "yNeg": 0.5,
+        "zPos": 3.0, "zNeg": 2.6
       },
       "softness": 1.2,
       "engage": 0.5
@@ -51,17 +72,17 @@
     "source": {
       "mode": "click",
       "keyboardSpeed": 2.5,
-      "demoSpeed": 0.25,
-      "floorY": 0,
+      "demoSpeed": 0.35,
+      "floorY": -0.5484,
       "sensor": {
         "url": "ws://garage-radar.local:81",
-        "originX": 0,
-        "originZ": 0,
-        "rotationDeg": 0,
+        "originX": 0.15,
+        "originZ": 2.75,
+        "rotationDeg": -182,
         "scale": 0.001,
         "flipSensorY": false,
         "showOverlay": true,
-        "mountHeight": 1.6,
+        "mountHeight": 1.35,
         "mountTilt": 0
       }
     }
