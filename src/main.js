@@ -85,6 +85,13 @@ for (const key in assets) {
 const startup = resolveStartup();
 applyParams(params, startup.params);
 
+// In the kiosk build (GitHub Pages) always start in demo mode regardless of
+// any saved session, so the public URL is a clean presentation experience.
+/* global __KIOSK__ */
+if (typeof __KIOSK__ !== 'undefined' && __KIOSK__) {
+    params.source.mode = 'demo';
+}
+
 app.start();
 
 function buildScene() {
@@ -422,21 +429,22 @@ function generateDefaultAnchors(center, halfExtents) {
  * reads to suppress the in-scene overlay (CSS handles the DOM chrome).
  */
 function createDisplayToggle() {
-    const state = { on: false };
+    const startOn = typeof __KIOSK__ !== 'undefined' && __KIOSK__;
+    const state = { on: startOn };
     const fab = document.createElement('button');
     fab.className = 'display-fab';
-    fab.title = 'Display mode — hide controls (V)';
     fab.setAttribute('aria-label', 'Toggle display mode');
     fab.textContent = '🖥';
-    const toggle = () => {
-        state.on = !state.on;
+    const applyState = () => {
         document.body.classList.toggle('display-mode', state.on);
         fab.title = state.on
             ? 'Exit display mode — show controls (V)'
             : 'Display mode — hide controls (V)';
     };
+    const toggle = () => { state.on = !state.on; applyState(); };
     fab.addEventListener('click', toggle);
     document.body.appendChild(fab);
+    applyState();
     return Object.assign(state, { element: fab, toggle });
 }
 
