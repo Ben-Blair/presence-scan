@@ -20,10 +20,10 @@ const RECONNECT_MAX_MS = 8000;
 
 /**
  * Parse a sensor WebSocket payload into an array of `{ x, y }` targets in mm.
- * Accepts the new `{ targets: [{x, y, speed}, …] }` shape (non-numeric entries
- * filtered) and the legacy single-target `{ x, y }`. Returns an array (possibly
- * empty, which means "no targets — clear the orbs") for a recognised packet, or
- * `null` for malformed JSON / an unrecognised shape (caller keeps the last frame).
+ * Accepts the `{ targets: [{x, y, speed}, …] }` shape (non-numeric entries
+ * filtered). Returns an array (possibly empty, which means "no targets — clear
+ * the orbs") for a recognised packet, or `null` for malformed JSON / an
+ * unrecognised shape (caller keeps the last frame).
  *
  * @param {string} data - raw JSON message text
  * @returns {{x:number, y:number}[] | null}
@@ -39,9 +39,6 @@ export function parseTargets(data) {
         return parsed.targets
             .filter((t) => typeof t.x === 'number' && typeof t.y === 'number')
             .map((t) => ({ x: t.x, y: t.y }));
-    }
-    if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-        return [{ x: parsed.x, y: parsed.y }];
     }
     return null;
 }

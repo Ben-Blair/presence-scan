@@ -21,10 +21,6 @@ describe('parseTargets', () => {
         expect(out).toEqual([{ x: 1, y: 2 }]);
     });
 
-    it('accepts the legacy single-target { x, y } shape', () => {
-        expect(parseTargets(JSON.stringify({ x: 9, y: 8 }))).toEqual([{ x: 9, y: 8 }]);
-    });
-
     it('returns an empty array for an empty target list (clears the orbs)', () => {
         expect(parseTargets(JSON.stringify({ targets: [] }))).toEqual([]);
     });

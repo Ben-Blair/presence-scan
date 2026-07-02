@@ -53,15 +53,6 @@ describe('resolveStartup', () => {
         expect(resolveStartup().view).toEqual(defaultView);
     });
 
-    it('migrates the legacy spawn-only save key', () => {
-        localStorage.setItem(
-            'garage-viewer-spawn-view',
-            JSON.stringify({ position: { x: 1, y: 2, z: 3 }, focus: { x: 0, y: 0, z: 0 } })
-        );
-        const { view } = resolveStartup();
-        expect(view.position).toEqual({ x: 1, y: 2, z: 3 });
-    });
-
     it('round-trips a saved session through saveSession', () => {
         const view = { position: { x: 1, y: 2, z: 3 }, focus: { x: 4, y: 5, z: 6 } };
         saveSession(view, defaultParams);

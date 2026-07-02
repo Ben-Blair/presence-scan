@@ -24,15 +24,8 @@ export const defaultParams = structuredClone(defaults.params);
 
 function readSession() {
     try {
-        let raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) {
-            // migrate legacy spawn-only saves
-            raw = localStorage.getItem('garage-viewer-spawn-view');
-            if (!raw) return null;
-            const legacy = JSON.parse(raw);
-            if (!legacy?.position || !legacy?.focus) return null;
-            return { view: legacy, params: null };
-        }
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
         const data = JSON.parse(raw);
         if (!data?.view?.position || !data?.view?.focus) return null;
         return data;
