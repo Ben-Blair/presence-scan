@@ -74,6 +74,17 @@
       "keyboardSpeed": 2.5,
       "demoSpeed": 0.35,
       "floorY": -0.5484,
+      "demo": {
+        "orbCount": 1,
+        "gridCell": 0.2,
+        "clearance": 0.25,
+        "avoidRadius": 0.6,
+        "floorOffset": 0,
+        "bandMin": 0.15,
+        "bandMax": 1.1,
+        "minSplats": 6,
+        "showNavDebug": false
+      },
       "sensor": {
         "url": "ws://garage-radar.local:81",
         "originX": 0.15,

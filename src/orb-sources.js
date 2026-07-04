@@ -1,6 +1,7 @@
-import { Vec3, Ray, Plane, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_SHIFT } from 'playcanvas';
+import { Vec3, Ray, Plane, BoundingBox, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_SHIFT } from 'playcanvas';
 import { isTypingInPanel } from './dom-utils.js';
-import { DEG_TO_RAD, insetBoundsXZ, clampToRoomXZ } from './math-utils.js';
+import { DEG_TO_RAD, clampToRoomXZ, CUTAWAY_ENGAGE_MARGIN } from './math-utils.js';
+import { DemoWander } from './demo-wander.js';
 
 const tmpRay = new Ray();
 const tmpPlane = new Plane();
@@ -46,7 +47,8 @@ export function parseTargets(data) {
 /**
  * Decides where the orbs should be. Three sources:
  *  - 'click':  double-click the floor to place the (primary) orb
- *  - 'demo':   the orb wanders around the room on a lissajous path
+ *  - 'demo':   orbs wander the room on A* paths over the nav grid, avoiding
+ *              obstacles and each other (see demo-wander.js)
  *  - 'sensor': positions stream in from an HLK mmwave sensor over WebSocket.
  *              The sensor packet carries up to three targets per frame
  *              ({ targets: [{x, y, speed}, …] }, mm), one orb each.
@@ -58,14 +60,24 @@ export class OrbSources {
      * @param {import('./orb-field.js').OrbField} field - the orb field
      * @param {*} params - global params object
      * @param {*} roomBounds - { center: Vec3, halfExtents: Vec3 } world-space room bounds
+     * @param {import('./nav-grid.js').NavGrid} navGrid - occupancy grid for demo-mode pathfinding
      */
-    constructor(app, cameraEntity, field, params, roomBounds) {
+    constructor(app, cameraEntity, field, params, roomBounds, navGrid) {
         this.app = app;
         this.camera = cameraEntity;
         this.field = field;
         this.params = params;
         this.roomBounds = roomBounds;
-        this.demoTime = 0;
+        this.demoWander = new DemoWander(navGrid, params, roomBounds);
+        // mirrors main.js's own outside-the-room test, so demo wander only
+        // avoids the wall-peeled zone when the cutaway effect is actually
+        // hiding it (see _isCutawayActive)
+        this._cutawayRoomBox = new BoundingBox(
+            roomBounds.center.clone(),
+            roomBounds.halfExtents.clone().add(
+                new Vec3(CUTAWAY_ENGAGE_MARGIN, CUTAWAY_ENGAGE_MARGIN, CUTAWAY_ENGAGE_MARGIN))
+        );
+        this._lastMode = null;
         this.socket = null;
         this.sensorStatus = 'disconnected';
         this.onStatusChange = null;
@@ -79,6 +91,25 @@ export class OrbSources {
 
         const canvas = app.graphicsDevice.canvas;
         canvas.addEventListener('dblclick', (e) => this.onDoubleClick(e));
+    }
+
+    /** Swap in a rebuilt nav grid (cell size / clearance retuned in the panel). */
+    setNavGrid(navGrid) {
+        this.demoWander.setGrid(navGrid, this._isCutawayActive());
+    }
+
+    /**
+     * Whether the splat cutaway (wall-peel) effect is actually rendering right
+     * now — mirrors main.js's own per-frame `cutOn` (anchor-follow suppresses
+     * it; 'auto' only engages once the camera is clearly outside the room).
+     * Demo wander uses this so it only avoids the peeled-away zone while it's
+     * genuinely invisible, instead of always treating the room as peeled.
+     */
+    _isCutawayActive() {
+        const mode = this.params.cutaway.mode;
+        if (mode === 'off' || this.params.camera.orbitOrb) return false;
+        if (mode === 'on') return true;
+        return !this._cutawayRoomBox.containsPoint(this.camera.getPosition());
     }
 
     /**
@@ -217,25 +248,13 @@ export class OrbSources {
 
     update(dt) {
         if (this.params.source.mode === 'demo') {
-            this.field.collapseToPrimary();
-            this.demoTime += dt * this.params.source.demoSpeed;
-            const t = this.demoTime;
-            const c = this.roomBounds.center;
-            const he = this.roomBounds.halfExtents;
-            const wp = this.params.cutaway.wallPeels;
-            const b = insetBoundsXZ(c, he, 0.15);
-            const innerMinX = b.minX + (wp.xNeg ?? 0);
-            const innerMaxX = b.maxX - (wp.xPos ?? 0);
-            const innerMinZ = b.minZ + (wp.zNeg ?? 0);
-            const innerMaxZ = b.maxZ - (wp.zPos ?? 0);
-            const midX = (innerMinX + innerMaxX) * 0.5;
-            const halfX = (innerMaxX - innerMinX) * 0.5;
-            const midZ = (innerMinZ + innerMaxZ) * 0.5;
-            const halfZ = (innerMaxZ - innerMinZ) * 0.5;
-            const x = midX + Math.sin(t) * halfX;
-            const z = midZ + Math.sin(t * 0.63 + 1.3) * halfZ;
-            const y = this.params.source.floorY + this.params.orb.height;
-            this.field.primary().setTarget(tmpOrbPos.set(x, y, z));
+            const cutOn = this._isCutawayActive();
+            // A* wander: on mode entry (re)spawn the orbs from wherever the
+            // primary stands, then let the wander controller drive all of them
+            if (this._lastMode !== 'demo') {
+                this.demoWander.reset(this.field.primary().getPosition(), cutOn);
+            }
+            this.field.setTargets(this.demoWander.update(dt, cutOn));
         } else if (this.params.source.mode === 'click') {
             this.field.collapseToPrimary();
             // keep the orb riding the travel plane even when no arrow key is
@@ -243,6 +262,7 @@ export class OrbSources {
             this.field.primary().target.y = this.params.source.floorY + this.params.orb.height;
             this.updateKeyboard(dt);
         }
+        this._lastMode = this.params.source.mode;
     }
 
     /** Arrow keys move the orb on the floor plane, relative to the camera view. */

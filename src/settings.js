@@ -11,6 +11,7 @@ import { createPanel } from './panel-controls.js';
  * @property {() => void} onOrbChanged
  * @property {() => void} onCameraChanged
  * @property {() => void} onSourceModeChanged
+ * @property {() => void} onNavChanged
  * @property {() => void} connectSensor
  * @property {() => void} disconnectSensor
  * @property {() => void} frameOrb
@@ -107,9 +108,22 @@ export function createSettingsPanel(params, hooks) {
         options: { 'Click to place': 'click', 'Demo path': 'demo', 'mmWave sensor': 'sensor' },
         onChange: () => hooks.onSourceModeChanged()
     });
-    src.addSlider(params.source, 'demoSpeed', { min: 0.05, max: 2, step: 0.05, label: 'demo speed' });
+    src.addSlider(params.source, 'demoSpeed', { min: 0.05, max: 2, step: 0.05, label: 'demo speed (m/s)' });
     src.addSlider(params.source, 'keyboardSpeed', { min: 0.5, max: 8, step: 0.5, label: 'arrow-key speed' });
     src.addSlider(params.source, 'floorY', { min: -5, max: 5, step: 0.01, label: 'floor height' });
+
+    // Demo-mode A* wander: avoidRadius is read live each frame; the grid
+    // geometry sliders rebuild the occupancy grid via the hook.
+    const onNav = () => hooks.onNavChanged();
+    const demo = src.addSection({ title: 'Demo wander (A*)', expanded: false });
+    demo.addSlider(params.source.demo, 'avoidRadius', { min: 0.2, max: 2, step: 0.05, label: 'orb avoid radius (m)' });
+    demo.addSlider(params.source.demo, 'gridCell', { min: 0.1, max: 0.5, step: 0.05, label: 'grid cell (m)', onChange: onNav });
+    demo.addSlider(params.source.demo, 'clearance', { min: 0, max: 0.6, step: 0.05, label: 'obstacle clearance (m)', onChange: onNav });
+    demo.addSlider(params.source.demo, 'floorOffset', { min: -0.5, max: 0.5, step: 0.01, label: 'floor offset (m)', onChange: onNav });
+    demo.addSlider(params.source.demo, 'bandMin', { min: 0, max: 0.6, step: 0.05, label: 'obstacle band min (m)', onChange: onNav });
+    demo.addSlider(params.source.demo, 'bandMax', { min: 0.3, max: 2.5, step: 0.05, label: 'obstacle band max (m)', onChange: onNav });
+    demo.addSlider(params.source.demo, 'minSplats', { min: 1, max: 30, step: 1, label: 'min splats per cell', onChange: onNav });
+    demo.addToggle(params.source.demo, 'showNavDebug', { label: 'show nav grid + paths' });
 
     const sensor = src.addSection({ title: 'HLK mmWave (WebSocket)', expanded: false });
     sensor.addText(params.source.sensor, 'url', { label: 'url' });

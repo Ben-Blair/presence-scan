@@ -5,6 +5,11 @@ import { math } from 'playcanvas';
 
 export const { clamp, lerp, DEG_TO_RAD, RAD_TO_DEG } = math;
 
+// How far outside the room-bounds box the camera must be before auto-cutaway
+// engages (matches the shader's own outside-face test). Shared so demo-mode's
+// wander box can agree with main.js on whether cutaway is actually active.
+export const CUTAWAY_ENGAGE_MARGIN = 0.3;
+
 /**
  * Frame-rate-independent exponential smoothing factor: the fraction to move
  * from current toward target this frame so the half-life is constant regardless

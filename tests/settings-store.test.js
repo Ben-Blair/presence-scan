@@ -60,4 +60,17 @@ describe('resolveStartup', () => {
         expect(restored.view.position).toEqual({ x: 1, y: 2, z: 3 });
         expect(restored.view.focus).toEqual({ x: 4, y: 5, z: 6 });
     });
+
+    it('fills new default subtrees missing from an older saved session', () => {
+        // a session saved before source.demo existed: its source tree lacks
+        // the demo subtree, and the new defaults must survive the merge
+        localStorage.setItem('garage-viewer-settings', JSON.stringify({
+            view: { position: { x: 0, y: 0, z: 0 }, focus: { x: 0, y: 0, z: 0 } },
+            params: { source: { mode: 'demo', demoSpeed: 0.5 } }
+        }));
+        const { params } = resolveStartup();
+        expect(params.source.mode).toBe('demo');
+        expect(params.source.demoSpeed).toBe(0.5);
+        expect(params.source.demo).toEqual(defaultParams.source.demo);
+    });
 });

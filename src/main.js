@@ -28,6 +28,9 @@ import { applyParams, resolveStartup, resetToDefaults, saveSession } from './set
 import { OrbField } from './orb-field.js';
 import { SplatFX } from './splat-effects.js';
 import { OrbSources } from './orb-sources.js';
+import { buildNavGrid, buildNavGridFromPoints, estimateFloorY, extractWorldTriangles } from './nav-grid.js';
+import { NavDebugOverlay } from './nav-debug.js';
+import { insetBoundsXZ, CUTAWAY_ENGAGE_MARGIN } from './math-utils.js';
 import { WaypointCamera } from './waypoint-camera.js';
 import { SensorMinimap } from './sensor-minimap.js';
 import { SensorOverlay } from './sensor-overlay.js';
@@ -115,10 +118,50 @@ function buildScene() {
         worldAabb.setFromTransformedAabb(
             /** @type {any} */ (assets.garage.resource).aabb, splat.getWorldTransform());
     }
-    collisionMesh.destroy();
     const center = worldAabb.center.clone();
     const halfExtents = worldAabb.halfExtents.clone();
     params.source.floorY = worldAabb.getMin().y + 0.05;
+
+    // ---------------------------------------------------------- nav grid
+    // demo-mode occupancy grid, rasterized from the gaussian splat centers
+    // themselves so obstacles match the visible scan exactly. The obstacle
+    // height band is anchored to the real floor plane estimated from the
+    // splats' y-density (params.source.floorY sits ~0.55m lower — the room
+    // AABB min includes the driveway sloping away outside the door). Falls
+    // back to collision-mesh triangles if the engine kept no CPU centers.
+    const gsRes = /** @type {any} */ (assets.garage.resource);
+    const useSplatNav = !!(gsRes && gsRes.hasCenters);
+    // fallback path only: triangles must be grabbed before the mesh is destroyed
+    const navTris = useSplatNav ? null : extractWorldTriangles(collisionMesh);
+    collisionMesh.destroy();
+    const splatMatrix = splat.getWorldTransform().data;
+    const navBounds = insetBoundsXZ(center, halfExtents, 0.15);
+    const estFloor = useSplatNav
+        ? (estimateFloorY(gsRes.centers, splatMatrix, navBounds) ?? params.source.floorY)
+        : params.source.floorY;
+    const navGridOpts = () => {
+        const d = params.source.demo;
+        const floor = estFloor + d.floorOffset;
+        return {
+            ...navBounds,
+            cell: d.gridCell,
+            yMin: floor + d.bandMin,
+            yMax: floor + d.bandMax,
+            inflate: d.clearance,
+            // keep the slider's meaning stable across cell sizes (splats/area)
+            minCount: Math.max(1, Math.round(d.minSplats * (d.gridCell / 0.2) ** 2)),
+            floorY: floor
+        };
+    };
+    const buildGrid = () => (useSplatNav
+        ? buildNavGridFromPoints(gsRes.centers, splatMatrix, navGridOpts())
+        : buildNavGrid(navTris ?? [], navGridOpts()));
+    const buildStart = performance.now();
+    let navGrid = buildGrid();
+    console.info(`[nav] ${useSplatNav ? 'splat' : 'mesh'} grid ${navGrid.cols}x${navGrid.rows} built in ` +
+        `${(performance.now() - buildStart).toFixed(1)}ms, ` +
+        `${navGrid.blocked.reduce((a, b) => a + b, 0)} blocked cells, ` +
+        `floor est ${estFloor.toFixed(3)}`);
 
     // ---------------------------------------------------------- anchors
     // Auto-derive default zones from the runtime room bounds when none are
@@ -183,7 +226,7 @@ function buildScene() {
     }
 
     // ---------------------------------------------------------- orb sources
-    const sources = new OrbSources(app, camera, field, params, { center, halfExtents });
+    const sources = new OrbSources(app, camera, field, params, { center, halfExtents }, navGrid);
 
     // ---------------------------------------------------------- waypoint cam
     const autoCam = new WaypointCamera(camera, controls, orb, { center, halfExtents }, params);
@@ -240,6 +283,10 @@ function buildScene() {
     // the sensor placement against the scan.
     const sensorOverlay = new SensorOverlay(app, params, field, sources);
 
+    // Debug view of the nav grid + the demo orbs' live A* paths (demo mode
+    // only, toggled from the panel).
+    const navDebug = new NavDebugOverlay(app, params, navGrid, sources.demoWander);
+
     // ---------------------------------------------------------- settings
     const hooks = {
         sources,
@@ -252,6 +299,11 @@ function buildScene() {
             /** @type {any} */ (camera.camera).fov = params.camera.fov;
             app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio, params.camera.renderScale);
             app.resizeCanvas();
+        },
+        onNavChanged: () => {
+            navGrid = buildGrid();
+            sources.setNavGrid(navGrid);
+            navDebug.setGrid(navGrid);
         },
         onSourceModeChanged: () => {
             if (params.source.mode === 'sensor') {
@@ -291,16 +343,15 @@ function buildScene() {
     wireHotkeys({ pane, controls, orb, displayMode, captureAnchor, saveCurrentSession });
 
     // debug handle for console inspection
-    window.__viewer = { app, splat, camera, controls, orb, field, sources, autoCam, minimap, sensorOverlay, displayMode, center, halfExtents, params };
+    window.__viewer = { app, splat, camera, controls, orb, field, sources, autoCam, minimap, sensorOverlay, displayMode, center, halfExtents, params, get navGrid() { return navGrid; } };
 
     // ---------------------------------------------------------- per-frame
     // auto-cutaway engages only when the camera is clearly OUTSIDE the room, so
     // moving around (or near a wall) inside never trips it. The box is inflated
     // by an engage margin that matches the shader's own outside-face test.
-    const engageMargin = 0.3;
     const roomBox = new BoundingBox(
         center.clone(),
-        halfExtents.clone().add(new Vec3(engageMargin, engageMargin, engageMargin))
+        halfExtents.clone().add(new Vec3(CUTAWAY_ENGAGE_MARGIN, CUTAWAY_ENGAGE_MARGIN, CUTAWAY_ENGAGE_MARGIN))
     );
 
     const round = (v, step) => Math.round(v / step) * step;
@@ -308,7 +359,10 @@ function buildScene() {
     app.on('update', (dt) => {
         sources.update(dt);
         field.update(dt, params.orb.smoothing);
-        if (!displayMode.on) sensorOverlay.update();
+        if (!displayMode.on) {
+            sensorOverlay.update();
+            navDebug.update();
+        }
 
         // anchor follow mode: drive the camera automatically (suspends the
         // manual CameraControls while active)
