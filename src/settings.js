@@ -120,9 +120,9 @@ export function createSettingsPanel(params, hooks) {
     demo.addSlider(params.source.demo, 'gridCell', { min: 0.1, max: 0.5, step: 0.05, label: 'grid cell (m)', onChange: onNav });
     demo.addSlider(params.source.demo, 'clearance', { min: 0, max: 0.6, step: 0.05, label: 'obstacle clearance (m)', onChange: onNav });
     demo.addSlider(params.source.demo, 'floorOffset', { min: -0.5, max: 0.5, step: 0.01, label: 'floor offset (m)', onChange: onNav });
-    demo.addSlider(params.source.demo, 'bandMin', { min: 0, max: 0.6, step: 0.05, label: 'obstacle band min (m)', onChange: onNav });
-    demo.addSlider(params.source.demo, 'bandMax', { min: 0.3, max: 2.5, step: 0.05, label: 'obstacle band max (m)', onChange: onNav });
-    demo.addSlider(params.source.demo, 'minSplats', { min: 1, max: 30, step: 1, label: 'min splats per cell', onChange: onNav });
+    demo.addSlider(params.source.demo, 'groundGap', { min: 0, max: 0.6, step: 0.05, label: 'grounded within (m)', onChange: onNav });
+    demo.addSlider(params.source.demo, 'gapBridge', { min: 0, max: 0.6, step: 0.05, label: 'seal wall gaps (m)', onChange: onNav });
+    demo.addSlider(params.source.demo, 'minPerBin', { min: 1, max: 20, step: 1, label: 'min splats per bin', onChange: onNav });
     demo.addToggle(params.source.demo, 'showNavDebug', { label: 'show nav grid + paths' });
 
     const sensor = src.addSection({ title: 'HLK mmWave (WebSocket)', expanded: false });

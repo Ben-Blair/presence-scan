@@ -28,7 +28,7 @@ import { applyParams, resolveStartup, resetToDefaults, saveSession } from './set
 import { OrbField } from './orb-field.js';
 import { SplatFX } from './splat-effects.js';
 import { OrbSources } from './orb-sources.js';
-import { buildNavGrid, buildNavGridFromPoints, estimateFloorY, extractWorldTriangles } from './nav-grid.js';
+import { buildNavGridFromColumns, emptyGrid, estimateFloorY } from './nav-grid.js';
 import { NavDebugOverlay } from './nav-debug.js';
 import { insetBoundsXZ, CUTAWAY_ENGAGE_MARGIN } from './math-utils.js';
 import { WaypointCamera } from './waypoint-camera.js';
@@ -123,42 +123,53 @@ function buildScene() {
     params.source.floorY = worldAabb.getMin().y + 0.05;
 
     // ---------------------------------------------------------- nav grid
-    // demo-mode occupancy grid, rasterized from the gaussian splat centers
-    // themselves so obstacles match the visible scan exactly. The obstacle
-    // height band is anchored to the real floor plane estimated from the
-    // splats' y-density (params.source.floorY sits ~0.55m lower — the room
-    // AABB min includes the driveway sloping away outside the door). Falls
-    // back to collision-mesh triangles if the engine kept no CPU centers.
+    // demo-mode occupancy grid, derived entirely from the gaussian splat centers
+    // (no collision mesh) so obstacles match the visible scan by construction. A
+    // cell is blocked when its column holds a *grounded* solid reaching the orb's
+    // travel height (buildNavGridFromColumns): thin floor speckle and wall-hung
+    // clutter floating above the floor are rejected, so the footprint hugs the
+    // real object. The vertical extent is anchored to the real floor plane
+    // estimated from the splats' y-density (params.source.floorY sits ~0.55m
+    // lower — the room AABB min includes the driveway sloping away outside the
+    // door). Sparse wall coverage can leave holes; buildNavGridFromColumns closes
+    // small gaps (gapBridge) so the walkable flood-fill can't leak past the walls.
     const gsRes = /** @type {any} */ (assets.garage.resource);
     const useSplatNav = !!(gsRes && gsRes.hasCenters);
-    // fallback path only: triangles must be grabbed before the mesh is destroyed
-    const navTris = useSplatNav ? null : extractWorldTriangles(collisionMesh);
-    collisionMesh.destroy();
+    collisionMesh.destroy(); // measured for room bounds only; never feeds the nav grid
     const splatMatrix = splat.getWorldTransform().data;
     const navBounds = insetBoundsXZ(center, halfExtents, 0.15);
     const estFloor = useSplatNav
         ? (estimateFloorY(gsRes.centers, splatMatrix, navBounds) ?? params.source.floorY)
         : params.source.floorY;
+    const V_BIN = 0.1; // vertical bin height (m) for the column occupancy profile
     const navGridOpts = () => {
         const d = params.source.demo;
         const floor = estFloor + d.floorOffset;
+        // the orb rides at floorY + orb.height; block columns that reach it
+        const reachHeight = Math.max(V_BIN,
+            (params.source.floorY + params.orb.height) - floor);
         return {
             ...navBounds,
             cell: d.gridCell,
-            yMin: floor + d.bandMin,
-            yMax: floor + d.bandMax,
+            floorY: floor,
+            vBin: V_BIN,
+            reachHeight,
+            groundGap: d.groundGap,
+            gapBridge: d.gapBridge,
             inflate: d.clearance,
             // keep the slider's meaning stable across cell sizes (splats/area)
-            minCount: Math.max(1, Math.round(d.minSplats * (d.gridCell / 0.2) ** 2)),
-            floorY: floor
+            minCount: Math.max(1, Math.round(d.minPerBin * (d.gridCell / 0.2) ** 2))
         };
     };
-    const buildGrid = () => (useSplatNav
-        ? buildNavGridFromPoints(gsRes.centers, splatMatrix, navGridOpts())
-        : buildNavGrid(navTris ?? [], navGridOpts()));
+    const buildGrid = () => {
+        const opts = navGridOpts();
+        if (useSplatNav) return buildNavGridFromColumns(gsRes.centers, splatMatrix, opts);
+        console.warn('[nav] splat has no CPU centers — demo runs with no obstacles');
+        return emptyGrid(opts);
+    };
     const buildStart = performance.now();
     let navGrid = buildGrid();
-    console.info(`[nav] ${useSplatNav ? 'splat' : 'mesh'} grid ${navGrid.cols}x${navGrid.rows} built in ` +
+    console.info(`[nav] ${useSplatNav ? 'splat' : 'empty'} grid ${navGrid.cols}x${navGrid.rows} built in ` +
         `${(performance.now() - buildStart).toFixed(1)}ms, ` +
         `${navGrid.blocked.reduce((a, b) => a + b, 0)} blocked cells, ` +
         `floor est ${estFloor.toFixed(3)}`);

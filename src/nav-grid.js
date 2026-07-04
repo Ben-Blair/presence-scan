@@ -1,10 +1,15 @@
-// 2D occupancy grid on the floor (XZ) plane. Primary source: the gaussian
-// splat centers themselves (`buildNavGridFromPoints`) — cells holding enough
-// splats inside the obstacle height band are blocked, so the grid matches the
-// *visible* scan by construction. Fallback source: collision-mesh triangles
-// (`buildNavGrid`). Blocked cells are dilated by the orb's clearance radius so
-// the planner can treat the orb as a point. Everything except
-// `extractWorldTriangles` is pure and unit-testable.
+// 2D occupancy grid on the floor (XZ) plane, derived entirely from the gaussian
+// splat centers (`buildNavGridFromColumns`) so obstacles match the *visible*
+// scan by construction — the collision mesh is not involved. A cell is blocked
+// when its column holds a *grounded* solid that reaches the orb's height: the
+// lowest occupied vertical bin sits near the floor and a contiguous occupied
+// run rises to `reachHeight`. That rejects thin floor speckle (never rises) and
+// wall-hung clutter floating above the floor (the orb passes under it), and
+// keeps the footprint tight to the real object. A morphological close
+// (`closeGaps`) then bridges small holes left by sparse wall coverage so the
+// walkable flood-fill can't leak past a gap in the scan, and finally blocked
+// cells are dilated by the orb's clearance radius so the planner can treat the
+// orb as a point. The whole module is pure and unit-testable.
 
 /**
  * @typedef {Object} NavGrid
@@ -16,13 +21,6 @@
  * @property {Uint8Array} blocked - cols*rows occupancy flags (1 = blocked)
  * @property {number | null} floorY - world y of the walkable plane this grid
  *   was built against (the debug overlay draws here), or null if unknown
- */
-
-/**
- * @typedef {Object} TriangleMesh
- * @property {Float32Array} positions - world-space xyz triples
- * @property {Uint32Array | null} indices - triangle indices, or null if the
- *   positions are already sequential triangles
  */
 
 /** Flat index of cell (cx, cz). No bounds check — pair with {@link isBlocked}. */
@@ -64,98 +62,8 @@ export function cellToWorld(grid, cx, cz) {
     };
 }
 
-/**
- * Rasterize world-space triangle meshes into an occupancy grid over the given
- * XZ bounds. A triangle marks a cell when its y-range intersects
- * [yMin, yMax] (the obstacle height band — floor and ceiling geometry filtered
- * out) and its XZ projection overlaps the cell (exact SAT test, so thin walls
- * can't slip between cell centers). Blocked cells are then dilated by
- * `inflate` meters so path planning can treat the agent as a point.
- *
- * @param {TriangleMesh[]} meshes
- * @param {{minX:number, maxX:number, minZ:number, maxZ:number, cell:number,
- *          yMin:number, yMax:number, inflate:number, floorY?:number}} opts
- * @returns {NavGrid}
- */
-export function buildNavGrid(meshes, opts) {
-    const { minX, minZ, cell, yMin, yMax } = opts;
-    const cols = Math.max(1, Math.ceil((opts.maxX - minX) / cell));
-    const rows = Math.max(1, Math.ceil((opts.maxZ - minZ) / cell));
-    const blocked = new Uint8Array(cols * rows);
-    const grid = { cols, rows, cell, minX, minZ, blocked, floorY: opts.floorY ?? null };
-
-    for (const mesh of meshes) {
-        const pos = mesh.positions;
-        const idx = mesh.indices;
-        const triCount = idx ? Math.floor(idx.length / 3) : Math.floor(pos.length / 9);
-        for (let t = 0; t < triCount; t++) {
-            const i0 = (idx ? idx[t * 3] : t * 3) * 3;
-            const i1 = (idx ? idx[t * 3 + 1] : t * 3 + 1) * 3;
-            const i2 = (idx ? idx[t * 3 + 2] : t * 3 + 2) * 3;
-            const ay = pos[i0 + 1], by = pos[i1 + 1], cy = pos[i2 + 1];
-            // skip triangles entirely outside the obstacle height band
-            if (Math.min(ay, by, cy) > yMax || Math.max(ay, by, cy) < yMin) continue;
-            rasterizeTriangleXZ(grid,
-                pos[i0], pos[i0 + 2],
-                pos[i1], pos[i1 + 2],
-                pos[i2], pos[i2 + 2]);
-        }
-    }
-
-    if (opts.inflate > 0) dilate(grid, opts.inflate / cell);
-    return grid;
-}
-
-/** Mark every cell whose XZ square overlaps triangle (a, b, c) as blocked. */
-function rasterizeTriangleXZ(grid, ax, az, bx, bz, cx, cz) {
-    const { cols, rows, cell, minX, minZ } = grid;
-    const c0 = Math.max(0, Math.floor((Math.min(ax, bx, cx) - minX) / cell));
-    const c1 = Math.min(cols - 1, Math.floor((Math.max(ax, bx, cx) - minX) / cell));
-    const r0 = Math.max(0, Math.floor((Math.min(az, bz, cz) - minZ) / cell));
-    const r1 = Math.min(rows - 1, Math.floor((Math.max(az, bz, cz) - minZ) / cell));
-    for (let r = r0; r <= r1; r++) {
-        for (let c = c0; c <= c1; c++) {
-            if (grid.blocked[r * cols + c]) continue;
-            const x0 = minX + c * cell;
-            const z0 = minZ + r * cell;
-            if (triangleOverlapsRect(ax, az, bx, bz, cx, cz, x0, z0, x0 + cell, z0 + cell)) {
-                grid.blocked[r * cols + c] = 1;
-            }
-        }
-    }
-}
-
-/**
- * 2D SAT triangle-vs-rect overlap. The rect's own axes are guaranteed
- * overlapping by the caller's AABB range loop, so only the triangle's three
- * edge normals can separate. Degenerate (collinear) triangles — e.g. vertical
- * wall faces seen top-down — find no separating edge and conservatively mark
- * every cell in their (thin) XZ AABB.
- */
-function triangleOverlapsRect(ax, az, bx, bz, cx, cz, rx0, rz0, rx1, rz1) {
-    return !edgeSeparates(ax, az, bx, bz, cx, cz, rx0, rz0, rx1, rz1) &&
-           !edgeSeparates(bx, bz, cx, cz, ax, az, rx0, rz0, rx1, rz1) &&
-           !edgeSeparates(cx, cz, ax, az, bx, bz, rx0, rz0, rx1, rz1) ;
-}
-
-/** Whether edge (p→q)'s normal separates the rect from the triangle's third vertex o. */
-function edgeSeparates(px, pz, qx, qz, ox, oz, rx0, rz0, rx1, rz1) {
-    const nx = -(qz - pz);
-    const nz = qx - px;
-    const triSide = nx * (ox - px) + nz * (oz - pz);
-    if (triSide === 0) return false; // degenerate/collinear — this axis can't separate
-    const d0 = nx * (rx0 - px) + nz * (rz0 - pz);
-    const d1 = nx * (rx1 - px) + nz * (rz0 - pz);
-    const d2 = nx * (rx0 - px) + nz * (rz1 - pz);
-    const d3 = nx * (rx1 - px) + nz * (rz1 - pz);
-    return triSide > 0
-        ? (d0 < 0 && d1 < 0 && d2 < 0 && d3 < 0)
-        : (d0 > 0 && d1 > 0 && d2 > 0 && d3 > 0);
-}
-
-/** Dilate blocked cells by a euclidean disc of `radiusCells` (may be fractional). */
-function dilate(grid, radiusCells) {
-    const { cols, rows, blocked } = grid;
+/** Offsets of a euclidean disc of `radiusCells` (may be fractional), origin excluded. */
+function discOffsets(radiusCells) {
     const r = Math.ceil(radiusCells);
     const r2 = radiusCells * radiusCells;
     /** @type {{dx:number, dz:number}[]} */
@@ -165,6 +73,13 @@ function dilate(grid, radiusCells) {
             if ((dx !== 0 || dz !== 0) && dx * dx + dz * dz <= r2) offsets.push({ dx, dz });
         }
     }
+    return offsets;
+}
+
+/** Dilate blocked cells by a euclidean disc of `radiusCells` (may be fractional). */
+function dilate(grid, radiusCells) {
+    const { cols, rows, blocked } = grid;
+    const offsets = discOffsets(radiusCells);
     const src = blocked.slice();
     for (let cz = 0; cz < rows; cz++) {
         for (let cx = 0; cx < cols; cx++) {
@@ -176,6 +91,40 @@ function dilate(grid, radiusCells) {
             }
         }
     }
+}
+
+/**
+ * Erode blocked cells by a euclidean disc of `radiusCells`: a cell survives only
+ * if every disc neighbor is also blocked. Out-of-bounds neighbors count as
+ * blocked, so eroding never nibbles the grid's outer boundary (walls that hug
+ * the edge stay put). The dual of {@link dilate}.
+ */
+function erode(grid, radiusCells) {
+    const { cols, rows, blocked } = grid;
+    const offsets = discOffsets(radiusCells);
+    const src = blocked.slice();
+    for (let cz = 0; cz < rows; cz++) {
+        for (let cx = 0; cx < cols; cx++) {
+            if (!src[cz * cols + cx]) continue;
+            for (const { dx, dz } of offsets) {
+                const nx = cx + dx;
+                const nz = cz + dz;
+                if (nx < 0 || nz < 0 || nx >= cols || nz >= rows) continue; // OOB = blocked
+                if (!src[nz * cols + nx]) { blocked[cz * cols + cx] = 0; break; }
+            }
+        }
+    }
+}
+
+/**
+ * Morphological close: {@link dilate} then {@link erode} by the same radius.
+ * Bridges gaps and fills holes up to `2·radiusCells` wide (e.g. a sparse patch
+ * in a scanned wall) while restoring the true outer faces, so obstacle
+ * footprints stay tight. Used to seal wall gaps the flood-fill would leak past.
+ */
+function closeGaps(grid, radiusCells) {
+    dilate(grid, radiusCells);
+    erode(grid, radiusCells);
 }
 
 /**
@@ -230,44 +179,92 @@ export function estimateFloorY(centers, matrix, bounds) {
 }
 
 /**
- * Rasterize gaussian splat centers into an occupancy grid: a cell is blocked
- * when at least `minCount` centers land in it inside the [yMin, yMax] obstacle
- * height band (the count threshold rejects stray floater splats). Centers are
+ * Build an occupancy grid from gaussian splat centers by their per-column
+ * *vertical extent*. For each XZ cell, centers are binned by height above the
+ * floor (`floorY`) into `vBin`-tall bins up to `reachHeight`. A cell is blocked
+ * when its column holds a *grounded* solid that reaches the orb's height:
+ *
+ *   - a bin is *occupied* when it holds ≥ `minCount` centers (density gate that
+ *     rejects sparse floater/speckle splats);
+ *   - the lowest occupied bin must be *grounded* — its base within `groundGap`
+ *     of the floor — else the column is floating wall-hung clutter the orb
+ *     passes under;
+ *   - from there a contiguous occupied run (tolerating a single empty bin for
+ *     scan holes) must *reach* `reachHeight`, else it's thin floor speckle.
+ *
+ * Small gaps left by sparse wall coverage are then closed (`gapBridge` meters)
+ * so the walkable flood-fill can't leak through a hole in the scan, and finally
+ * blocked cells are dilated by `inflate` meters (clearance). Centers are
  * transformed local→world inline — no intermediate copy of the (large) array.
- * Blocked cells are then dilated by `inflate` meters, as with the mesh path.
  *
  * @param {Float32Array} centers - xyz triples in splat-local space
  * @param {ArrayLike<number>} matrix - column-major 4x4 local→world transform
  * @param {{minX:number, maxX:number, minZ:number, maxZ:number, cell:number,
- *          yMin:number, yMax:number, inflate:number, minCount:number,
- *          floorY?:number}} opts
+ *          floorY:number, reachHeight:number, groundGap:number, vBin:number,
+ *          minCount:number, gapBridge:number, inflate:number}} opts
  * @returns {NavGrid}
  */
-export function buildNavGridFromPoints(centers, matrix, opts) {
+export function buildNavGridFromColumns(centers, matrix, opts) {
     const m = matrix;
-    const { minX, minZ, cell, yMin, yMax } = opts;
+    const { minX, minZ, cell, floorY, vBin, reachHeight, groundGap, minCount } = opts;
     const cols = Math.max(1, Math.ceil((opts.maxX - minX) / cell));
     const rows = Math.max(1, Math.ceil((opts.maxZ - minZ) / cell));
-    const counts = new Uint32Array(cols * rows); // wall cells can hold >64k splats
+    // one extra bin so a run can be seen to reach the top of [floor, reachHeight]
+    const nBins = Math.max(1, Math.ceil(reachHeight / vBin)) + 1;
+    const yTop = floorY + nBins * vBin;
+    const binCounts = new Uint32Array(cols * rows * nBins); // wall cells hold many
     for (let i = 0; i < centers.length; i += 3) {
         const x = centers[i], y = centers[i + 1], z = centers[i + 2];
         const wy = m[1] * x + m[5] * y + m[9] * z + m[13];
-        if (wy < yMin || wy > yMax) continue;
+        if (wy < floorY || wy >= yTop) continue;
         const wx = m[0] * x + m[4] * y + m[8] * z + m[12];
         const cx = Math.floor((wx - minX) / cell);
         if (cx < 0 || cx >= cols) continue;
         const wz = m[2] * x + m[6] * y + m[10] * z + m[14];
         const cz = Math.floor((wz - minZ) / cell);
         if (cz < 0 || cz >= rows) continue;
-        counts[cz * cols + cx]++;
+        const b = Math.floor((wy - floorY) / vBin);
+        binCounts[(cz * cols + cx) * nBins + b]++;
     }
+    const groundBins = groundGap / vBin;       // grounded base must be at/below this bin
+    const reachBins = reachHeight / vBin;       // run must extend to at least this bin
     const blocked = new Uint8Array(cols * rows);
-    for (let i = 0; i < counts.length; i++) {
-        if (counts[i] >= opts.minCount) blocked[i] = 1;
+    for (let c = 0; c < cols * rows; c++) {
+        const base = c * nBins;
+        // lowest occupied bin
+        let lo = -1;
+        for (let b = 0; b < nBins; b++) {
+            if (binCounts[base + b] >= minCount) { lo = b; break; }
+        }
+        if (lo < 0 || lo > groundBins) continue; // empty, or floating clutter
+        // extend a contiguous occupied run upward, tolerating one empty bin
+        let top = lo;
+        let gap = 0;
+        for (let b = lo + 1; b < nBins; b++) {
+            if (binCounts[base + b] >= minCount) { top = b; gap = 0; }
+            else if (++gap > 1) break;
+        }
+        if (top + 1 >= reachBins) blocked[c] = 1; // run reaches the orb's height
     }
-    const grid = { cols, rows, cell, minX, minZ, blocked, floorY: opts.floorY ?? null };
+    const grid = { cols, rows, cell, minX, minZ, blocked, floorY };
+    if (opts.gapBridge > 0) closeGaps(grid, opts.gapBridge / cell);
     if (opts.inflate > 0) dilate(grid, opts.inflate / cell);
     return grid;
+}
+
+/**
+ * Empty (all-free) grid over the given XZ bounds — used when the engine kept no
+ * CPU splat centers, so demo mode still runs with no obstacles.
+ *
+ * @param {{minX:number, maxX:number, minZ:number, maxZ:number, cell:number,
+ *          floorY?:number}} opts
+ * @returns {NavGrid}
+ */
+export function emptyGrid(opts) {
+    const { minX, minZ, cell } = opts;
+    const cols = Math.max(1, Math.ceil((opts.maxX - minX) / cell));
+    const rows = Math.max(1, Math.ceil((opts.maxZ - minZ) / cell));
+    return { cols, rows, cell, minX, minZ, blocked: new Uint8Array(cols * rows), floorY: opts.floorY ?? null };
 }
 
 /**
@@ -342,37 +339,4 @@ export function nearestFreeCell(grid, cx, cz) {
         ring = next;
     }
     return null;
-}
-
-/**
- * Pull every render mesh out of an instantiated container entity as flat
- * world-space triangle arrays, before the entity is destroyed. Positions are
- * baked through each mesh instance's world transform.
- *
- * @param {*} entity - an entity hierarchy from `instantiateRenderEntity()`
- * @returns {TriangleMesh[]}
- */
-export function extractWorldTriangles(entity) {
-    /** @type {TriangleMesh[]} */
-    const meshes = [];
-    entity.findComponents('render').forEach((render) => {
-        render.meshInstances.forEach((mi) => {
-            /** @type {number[]} */
-            const local = [];
-            if (!mi.mesh.getPositions(local)) return;
-            /** @type {number[]} */
-            const indices = [];
-            mi.mesh.getIndices(indices);
-            const m = mi.node.getWorldTransform().data; // column-major 4x4
-            const positions = new Float32Array(local.length);
-            for (let i = 0; i < local.length; i += 3) {
-                const x = local[i], y = local[i + 1], z = local[i + 2];
-                positions[i] = m[0] * x + m[4] * y + m[8] * z + m[12];
-                positions[i + 1] = m[1] * x + m[5] * y + m[9] * z + m[13];
-                positions[i + 2] = m[2] * x + m[6] * y + m[10] * z + m[14];
-            }
-            meshes.push({ positions, indices: indices.length ? new Uint32Array(indices) : null });
-        });
-    });
-    return meshes;
 }

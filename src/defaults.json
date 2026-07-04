@@ -80,9 +80,9 @@
         "clearance": 0.25,
         "avoidRadius": 0.6,
         "floorOffset": 0,
-        "bandMin": 0.15,
-        "bandMax": 1.1,
-        "minSplats": 6,
+        "minPerBin": 2,
+        "groundGap": 0.25,
+        "gapBridge": 0.3,
         "showNavDebug": false
       },
       "sensor": {

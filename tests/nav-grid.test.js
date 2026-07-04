@@ -1,17 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
-    buildNavGrid, buildNavGridFromPoints, estimateFloorY,
+    buildNavGridFromColumns, emptyGrid, estimateFloorY,
     cellIndex, isBlocked, worldToCell, cellToWorld,
     computeReachable, nearestFreeCell
 } from '../src/nav-grid.js';
-
-/** Pack triangles given as [ax,ay,az, bx,by,bz, cx,cy,cz] rows into a mesh. */
-function meshOf(...tris) {
-    return { positions: new Float32Array(tris.flat()), indices: null };
-}
-
-// 5x5 m footprint, 1 m cells, obstacle band 0.1–2 m
-const BOUNDS = { minX: 0, maxX: 5, minZ: 0, maxZ: 5, cell: 1, yMin: 0.1, yMax: 2, inflate: 0 };
 
 function blockedCells(grid) {
     const out = [];
@@ -23,71 +15,15 @@ function blockedCells(grid) {
     return out;
 }
 
-describe('buildNavGrid', () => {
-    it('marks exactly the cell under a small obstacle-height triangle', () => {
-        const mesh = meshOf([2.2, 1, 2.2, 2.8, 1, 2.2, 2.5, 1, 2.8]);
-        const grid = buildNavGrid([mesh], BOUNDS);
-        expect(blockedCells(grid)).toEqual([[2, 2]]);
-    });
+/** A 5x5 m, 1 m-cell NavGrid with the given cells pre-blocked. */
+function makeGrid(blocked = []) {
+    const cols = 5, rows = 5;
+    const b = new Uint8Array(cols * rows);
+    for (const [cx, cz] of blocked) b[cz * cols + cx] = 1;
+    return { cols, rows, cell: 1, minX: 0, minZ: 0, blocked: b, floorY: null };
+}
 
-    it('ignores floor and ceiling triangles outside the height band', () => {
-        const floor = meshOf([0, 0.02, 0, 5, 0.02, 0, 2.5, 0.02, 5]);
-        const ceiling = meshOf([0, 2.5, 0, 5, 2.5, 0, 2.5, 2.5, 5]);
-        const grid = buildNavGrid([floor, ceiling], BOUNDS);
-        expect(blockedCells(grid)).toEqual([]);
-    });
-
-    it('blocks a gap-free row under a thin vertical wall', () => {
-        // wall quad spanning x 0–5 at z = 2.5 (degenerate in XZ projection)
-        const wall = meshOf(
-            [0, 0, 2.5, 5, 0, 2.5, 5, 1.8, 2.5],
-            [0, 0, 2.5, 5, 1.8, 2.5, 0, 1.8, 2.5]
-        );
-        const grid = buildNavGrid([wall], BOUNDS);
-        expect(blockedCells(grid)).toEqual([[0, 2], [1, 2], [2, 2], [3, 2], [4, 2]]);
-    });
-
-    it('does not mark cells inside the triangle AABB that the triangle misses', () => {
-        // right triangle with hypotenuse x+z=3: its AABB covers a 4x4 block of
-        // cells but the far corner cells lie fully beyond the hypotenuse
-        const mesh = meshOf([0, 1, 0, 3, 1, 0, 0, 1, 3]);
-        const grid = buildNavGrid([mesh], BOUNDS);
-        expect(blockedCells(grid)).toEqual([
-            [0, 0], [1, 0], [2, 0], [3, 0],
-            [0, 1], [1, 1], [2, 1],
-            [0, 2], [1, 2],
-            [0, 3]
-        ]);
-        expect(isBlocked(grid, 2, 2)).toBe(false);
-        expect(isBlocked(grid, 3, 1)).toBe(false);
-    });
-
-    it('dilates a blocked cell into a euclidean disc', () => {
-        const mesh = meshOf([2.4, 1, 2.4, 2.6, 1, 2.4, 2.5, 1, 2.6]);
-        const grid = buildNavGrid([mesh], { ...BOUNDS, inflate: 1 });
-        // radius 1 cell: center + the four orthogonal neighbors, no diagonals
-        expect(blockedCells(grid).sort()).toEqual(
-            [[2, 1], [1, 2], [2, 2], [3, 2], [2, 3]].sort());
-    });
-
-    it('yields an all-free grid for no geometry', () => {
-        const grid = buildNavGrid([], BOUNDS);
-        expect(blockedCells(grid)).toEqual([]);
-        expect(grid.cols).toBe(5);
-        expect(grid.rows).toBe(5);
-    });
-
-    it('reads indexed triangle lists', () => {
-        const mesh = {
-            positions: new Float32Array([2.2, 1, 2.2, 2.8, 1, 2.2, 2.5, 1, 2.8]),
-            indices: new Uint32Array([0, 1, 2])
-        };
-        const grid = buildNavGrid([mesh], BOUNDS);
-        expect(blockedCells(grid)).toEqual([[2, 2]]);
-    });
-});
-
-// column-major 4x4 matrices for the point-based builders
+// column-major 4x4 matrices for the point-based builder
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 // the splat entity's 180° X rotation: world y = -local y, world z = -local z
 const FLIP_X180 = [1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1];
@@ -101,6 +37,20 @@ function centersOf(...pts) {
 function cluster(n, x, y, z, jitter = 0.01) {
     const out = [];
     for (let i = 0; i < n; i++) out.push([x, y + ((i % 3) - 1) * jitter, z]);
+    return out;
+}
+
+/**
+ * `perBin` points in each of the listed vertical `bins` (0.1 m tall, so bin b is
+ * centered at 0.1·b + 0.05), stacked over cell-center (x, z). `ysign` flips the
+ * height sign for the splat-flip matrix.
+ */
+function colPts(x, z, bins, perBin = 4, ysign = 1) {
+    const out = [];
+    for (const b of bins) {
+        const y = ysign * (b * 0.1 + 0.05);
+        for (let i = 0; i < perBin; i++) out.push([x, y, z]);
+    }
     return out;
 }
 
@@ -141,51 +91,96 @@ describe('estimateFloorY', () => {
     });
 });
 
-describe('buildNavGridFromPoints', () => {
+describe('buildNavGridFromColumns', () => {
+    // 5x5 m, 1 m cells; floor at y=0, orb reach 0.4 m, grounded within 0.2 m
     const OPTS = {
         minX: 0, maxX: 5, minZ: 0, maxZ: 5, cell: 1,
-        yMin: 0.1, yMax: 2, inflate: 0, minCount: 4
+        floorY: 0, vBin: 0.1, reachHeight: 0.4, groundGap: 0.2,
+        minCount: 4, gapBridge: 0, inflate: 0
     };
 
-    it('blocks a cell only at or above minCount', () => {
-        const below = centersOf(...cluster(3, 2.5, 1, 2.5));
-        expect(blockedCells(buildNavGridFromPoints(below, IDENTITY, OPTS))).toEqual([]);
-        const at = centersOf(...cluster(4, 2.5, 1, 2.5));
-        expect(blockedCells(buildNavGridFromPoints(at, IDENTITY, OPTS))).toEqual([[2, 2]]);
+    it('blocks a grounded column that reaches the orb height', () => {
+        const pts = centersOf(...colPts(2.5, 2.5, [0, 1, 2, 3]));
+        expect(blockedCells(buildNavGridFromColumns(pts, IDENTITY, OPTS))).toEqual([[2, 2]]);
     });
 
-    it('ignores points outside the height band', () => {
-        const pts = centersOf(
-            ...cluster(10, 2.5, 0.02, 2.5), // floor fuzz below yMin
-            ...cluster(10, 2.5, 2.6, 2.5)   // ceiling above yMax
-        );
-        expect(blockedCells(buildNavGridFromPoints(pts, IDENTITY, OPTS))).toEqual([]);
+    it('leaves floating clutter free (orb passes under it)', () => {
+        // occupied only well above the floor — no grounded base
+        const pts = centersOf(...colPts(2.5, 2.5, [3, 4]));
+        expect(blockedCells(buildNavGridFromColumns(pts, IDENTITY, OPTS))).toEqual([]);
+    });
+
+    it('leaves thin floor speckle free (never rises to the orb)', () => {
+        const pts = centersOf(...colPts(2.5, 2.5, [0]));
+        expect(blockedCells(buildNavGridFromColumns(pts, IDENTITY, OPTS))).toEqual([]);
+    });
+
+    it('requires minCount splats per bin to count a bin occupied', () => {
+        const pts = centersOf(...colPts(2.5, 2.5, [0, 1, 2, 3], 3)); // 3 < minCount
+        expect(blockedCells(buildNavGridFromColumns(pts, IDENTITY, OPTS))).toEqual([]);
+    });
+
+    it('tolerates a single empty bin in the run but not two', () => {
+        const oneGap = centersOf(...colPts(2.5, 2.5, [0, 1, 3])); // bin 2 empty
+        expect(blockedCells(buildNavGridFromColumns(oneGap, IDENTITY, OPTS))).toEqual([[2, 2]]);
+        const twoGap = centersOf(...colPts(2.5, 2.5, [0, 3])); // bins 1,2 empty
+        expect(blockedCells(buildNavGridFromColumns(twoGap, IDENTITY, OPTS))).toEqual([]);
     });
 
     it('transforms points through the matrix before binning', () => {
-        // local (1.5, -1, -3.5) → world (1.5, 1, 3.5) under the X flip
-        const pts = centersOf(...cluster(4, 1.5, -1, -3.5));
-        expect(blockedCells(buildNavGridFromPoints(pts, FLIP_X180, OPTS))).toEqual([[1, 3]]);
+        // local (1.5, -h, -3.5) → world (1.5, h, 3.5) under the X flip → cell (1,3)
+        const pts = centersOf(...colPts(1.5, -3.5, [0, 1, 2, 3], 4, -1));
+        expect(blockedCells(buildNavGridFromColumns(pts, FLIP_X180, OPTS))).toEqual([[1, 3]]);
+    });
+
+    it('closes an enclosed sparse patch in a wall (gapBridge)', () => {
+        // 7x7 grid, a solid 3x3 wall block centered at (3,3) with the middle
+        // cell missing (a sparse scan patch fully enclosed by wall). Close fills
+        // it without bloating the surrounding open floor. (Wall kept off the
+        // grid edge so the boundary-preserving erosion doesn't grow it.)
+        const BIG = { ...OPTS, minX: 0, maxX: 7, minZ: 0, maxZ: 7, gapBridge: 1 };
+        const ring = [];
+        for (let cx = 2; cx <= 4; cx++) {
+            for (let cz = 2; cz <= 4; cz++) {
+                if (cx === 3 && cz === 3) continue; // the missing patch
+                ring.push(...colPts(cx + 0.5, cz + 0.5, [0, 1, 2, 3]));
+            }
+        }
+        const grid = buildNavGridFromColumns(centersOf(...ring), IDENTITY, BIG);
+        expect(isBlocked(grid, 3, 3)).toBe(true);  // enclosed hole sealed
+        expect(isBlocked(grid, 0, 0)).toBe(false); // open floor untouched
     });
 
     it('dilates blocked cells by the inflate radius', () => {
-        const pts = centersOf(...cluster(4, 2.5, 1, 2.5));
-        const grid = buildNavGridFromPoints(pts, IDENTITY, { ...OPTS, inflate: 1 });
+        const pts = centersOf(...colPts(2.5, 2.5, [0, 1, 2, 3]));
+        const grid = buildNavGridFromColumns(pts, IDENTITY, { ...OPTS, inflate: 1 });
         expect(blockedCells(grid).sort()).toEqual(
             [[2, 1], [1, 2], [2, 2], [3, 2], [2, 3]].sort());
     });
 
-    it('carries the floorY anchor onto the grid (both builders)', () => {
-        const fromPoints = buildNavGridFromPoints(new Float32Array(0), IDENTITY, { ...OPTS, floorY: 0.12 });
-        expect(fromPoints.floorY).toBeCloseTo(0.12);
-        const fromMesh = buildNavGrid([], { ...BOUNDS, floorY: -0.5 });
-        expect(fromMesh.floorY).toBeCloseTo(-0.5);
-        expect(buildNavGrid([], BOUNDS).floorY).toBeNull();
+    it('carries the floorY anchor onto the grid', () => {
+        const grid = buildNavGridFromColumns(new Float32Array(0), IDENTITY, { ...OPTS, floorY: 0.12 });
+        expect(grid.floorY).toBeCloseTo(0.12);
+    });
+});
+
+describe('emptyGrid', () => {
+    it('is all-free over the given bounds', () => {
+        const grid = emptyGrid({ minX: 0, maxX: 5, minZ: 0, maxZ: 5, cell: 1 });
+        expect(blockedCells(grid)).toEqual([]);
+        expect(grid.cols).toBe(5);
+        expect(grid.rows).toBe(5);
+        expect(grid.floorY).toBeNull();
+    });
+
+    it('carries an explicit floorY', () => {
+        expect(emptyGrid({ minX: 0, maxX: 5, minZ: 0, maxZ: 5, cell: 1, floorY: -0.5 }).floorY)
+            .toBeCloseTo(-0.5);
     });
 });
 
 describe('grid helpers', () => {
-    const grid = buildNavGrid([], BOUNDS);
+    const grid = makeGrid();
 
     it('treats out-of-bounds cells as blocked', () => {
         expect(isBlocked(grid, -1, 0)).toBe(true);
@@ -206,11 +201,7 @@ describe('grid helpers', () => {
 
 describe('computeReachable', () => {
     it('excludes the far side of a sealing wall', () => {
-        const wall = meshOf(
-            [0, 0, 2.5, 5, 0, 2.5, 5, 1.8, 2.5],
-            [0, 0, 2.5, 5, 1.8, 2.5, 0, 1.8, 2.5]
-        );
-        const grid = buildNavGrid([wall], BOUNDS);
+        const grid = makeGrid([[0, 2], [1, 2], [2, 2], [3, 2], [4, 2]]);
         const { mask, list } = computeReachable(grid, 0, 0);
         expect(list).toHaveLength(10); // the two rows on the near side
         expect(mask[cellIndex(grid, 4, 1)]).toBe(1);
@@ -219,21 +210,18 @@ describe('computeReachable', () => {
     });
 
     it('is empty from a blocked start', () => {
-        const wall = meshOf([2.2, 1, 2.2, 2.8, 1, 2.2, 2.5, 1, 2.8]);
-        const grid = buildNavGrid([wall], BOUNDS);
+        const grid = makeGrid([[2, 2]]);
         expect(computeReachable(grid, 2, 2).list).toHaveLength(0);
     });
 });
 
 describe('nearestFreeCell', () => {
     it('returns the cell itself when free', () => {
-        const grid = buildNavGrid([], BOUNDS);
-        expect(nearestFreeCell(grid, 2, 2)).toEqual({ cx: 2, cz: 2 });
+        expect(nearestFreeCell(makeGrid(), 2, 2)).toEqual({ cx: 2, cz: 2 });
     });
 
     it('finds an adjacent free cell from inside an obstacle', () => {
-        const wall = meshOf([2.2, 1, 2.2, 2.8, 1, 2.2, 2.5, 1, 2.8]);
-        const grid = buildNavGrid([wall], BOUNDS);
+        const grid = makeGrid([[2, 2]]);
         const free = nearestFreeCell(grid, 2, 2);
         expect(free).not.toBeNull();
         expect(isBlocked(grid, free.cx, free.cz)).toBe(false);
@@ -241,7 +229,6 @@ describe('nearestFreeCell', () => {
     });
 
     it('clamps an out-of-bounds start into the grid', () => {
-        const grid = buildNavGrid([], BOUNDS);
-        expect(nearestFreeCell(grid, -3, 99)).toEqual({ cx: 0, cz: 4 });
+        expect(nearestFreeCell(makeGrid(), -3, 99)).toEqual({ cx: 0, cz: 4 });
     });
 });
