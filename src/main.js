@@ -515,7 +515,16 @@ function createDisplayToggle() {
             ? 'Exit display mode — show controls (V)'
             : 'Display mode — hide controls (V)';
     };
-    const toggle = () => { state.on = !state.on; applyState(); };
+    const toggle = () => {
+        state.on = !state.on;
+        applyState();
+        // Leaving display mode re-reveals the settings panel, but its page-stack
+        // height was last measured while `.cp` sat behind `display: none` (e.g.
+        // the kiosk build boots straight into display mode) and got baked in as
+        // 0px. The panel only re-measures on a window `resize`, so fire one here
+        // — same trick buildSection() uses when expanding a collapsed section.
+        window.dispatchEvent(new Event('resize'));
+    };
     fab.addEventListener('click', toggle);
     document.body.appendChild(fab);
     applyState();
