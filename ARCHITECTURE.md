@@ -5,7 +5,7 @@ A browser-based 3D viewer for a gaussian-splat scan of a garage, built directly 
 splat, places a glowing "location orb" on the floor, and can drive that orb from a live
 HLK/LD2450 mmWave radar so a person walking the real garage shows up as the orb in the scan.
 
-This document is the high-level map. `CLAUDE.md` has the finer-grained conventions.
+This document is the high-level map of the codebase and its conventions.
 
 ## Data flow
 
