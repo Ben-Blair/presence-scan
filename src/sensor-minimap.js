@@ -93,6 +93,9 @@ export class SensorMinimap {
         const visible = this.params.source.mode === 'sensor' ||
             st === 'connected' || st === 'connecting…' || st === 'reconnecting…';
         this.el.classList.toggle('radar-minimap--on', visible);
+        // Lift the keybindings hint bar above the minimap only while it's shown;
+        // in demo/click the bar sits in the corner (see `body.minimap-on #help`).
+        document.body.classList.toggle('minimap-on', visible);
         if (!visible) {
             this._stop();
             return;

@@ -64,22 +64,8 @@
             background: linear-gradient(90deg, #19a0ff, #7fd0ff);
             transition: width 0.2s ease;
         }
-        #help {
-            position: fixed;
-            left: 12px;
-            bottom: 260px; /* sits above the sensor minimap in the bottom-left */
-            color: rgba(232, 232, 240, 0.75);
-            background: rgba(10, 10, 18, 0.55);
-            backdrop-filter: blur(8px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 10px;
-            padding: 10px 14px;
-            font-size: 12px;
-            line-height: 1.7;
-            z-index: 50;
-            user-select: none;
-        }
-        #help b { color: #8fd0ff; font-weight: 600; }
+        /* #help (keybindings hint bar) is built by keybindings-bar.js and
+           styled in panel.css, so its content stays in sync with the mode. */
     </style>
 </head>
 <body>
@@ -88,10 +74,6 @@
         <div class="orb"></div>
         <div class="label">Loading garage…</div>
         <div class="bar"><div id="loading-progress"></div></div>
-    </div>
-    <div id="help">
-        <b>WASD</b> move &nbsp;·&nbsp; <b>Arrows</b> move orb &nbsp;·&nbsp; <b>L-drag</b> rotate &nbsp;·&nbsp; <b>R-drag</b> pan &nbsp;·&nbsp; <b>Scroll</b> zoom<br>
-        <b>Double-click</b> place orb &nbsp;·&nbsp; <b>F</b> frame orb &nbsp;·&nbsp; <b>H</b> save for next load &nbsp;·&nbsp; <b>O</b> cinematic follow &nbsp;·&nbsp; <b>P</b> hide panel &nbsp;·&nbsp; <b>V</b> display mode
     </div>
     <script type="module" src="/src/main.js"></script>
 </body>

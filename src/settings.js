@@ -22,6 +22,11 @@ import { createPanel } from './panel-controls.js';
 /**
  * Builds the custom settings panel bound to the shared params object.
  *
+ * The panel is an iOS-style page stack: a root page with the primary mode
+ * selector and a few essentials, and drill-in sub-pages (Orb / Camera / See
+ * inside / Advanced) reached via disclosure rows. All fine-tuning lives under
+ * Advanced so the root stays uncluttered.
+ *
  * @param {*} params - the shared params object
  * @param {PanelHooks} hooks - callbacks into main.js
  * @returns {{ element: HTMLElement, refresh: () => void, toggle: () => void }}
@@ -39,18 +44,19 @@ export function createSettingsPanel(params, hooks) {
         hidden = !hidden;
         panel.element.classList.toggle('cp--hidden', hidden);
         fab.classList.toggle('cp-fab--show', hidden);
+        if (hidden) panel.showRoot(); // reopen clean at the root page
     }
 
     const panel = createPanel({ title: 'Garage Viewer', onHide: toggle });
 
-    // --- Session ---
-    const session = panel.addSection({ title: 'Session' });
-    session.addButton({ title: 'Save for next load (H)', onClick: () => hooks.saveSession() });
-    session.addButton({ title: 'Reset to defaults', onClick: () => hooks.resetToDefaults() });
+    const onOrb = () => hooks.onOrbChanged();
+    const onCam = () => hooks.onCameraChanged();
+    const onNav = () => hooks.onNavChanged();
+
+    // ---- sub-pages (built first so root drill rows can target them) ---------
 
     // --- Orb ---
-    const onOrb = () => hooks.onOrbChanged();
-    const orb = panel.addSection({ title: 'Orb' });
+    const orb = panel.addPage({ id: 'orb', title: 'Orb' });
     orb.addColor(params.orb, 'color', { label: 'color', onChange: onOrb });
     orb.addSlider(params.orb, 'size', { min: 0.02, max: 0.5, step: 0.01, onChange: onOrb });
     orb.addSlider(params.orb, 'coreBrightness', { min: 0, max: 8, step: 0.1, label: 'brightness', onChange: onOrb });
@@ -60,41 +66,44 @@ export function createSettingsPanel(params, hooks) {
     orb.addSlider(params.orb, 'height', { min: 0, max: 3, step: 0.05, label: 'height (m)', onChange: onOrb });
     orb.addSlider(params.orb, 'smoothing', { min: 0.5, max: 20, step: 0.5, onChange: onOrb });
 
-    // --- Camera ---
-    const onCam = () => hooks.onCameraChanged();
-    const cam = panel.addSection({ title: 'Camera' });
+    // --- Camera (incl. Auto Follow) ---
+    const cam = panel.addPage({ id: 'camera', title: 'Camera' });
     cam.addSlider(params.camera, 'fov', { min: 20, max: 120, step: 1, label: 'FOV', onChange: onCam });
-    cam.addToggle(params.camera, 'orbitOrb', { label: 'anchor follow (O)', onChange: onCam });
-    cam.addSlider(params.camera, 'moveSpeed', { min: 0.5, max: 20, step: 0.5, label: 'speed', onChange: onCam });
+    cam.addToggle(params.camera, 'orbitOrb', { label: 'Auto Follow (O)', onChange: onCam });
+
+    // Auto Follow tuning — the auto camera that rides the anchor rail loop.
+    const follow = cam.addSection({ title: 'Auto Follow tuning', expanded: false });
+    follow.addSlider(params.camera.waypoint, 'railSmoothing', { min: 0.5, max: 8, step: 0.1, label: 'rail follow speed', onChange: onCam });
+    follow.addSlider(params.camera.waypoint, 'parkBias', { min: 0, max: 1, step: 0.05, label: 'stick at corners', onChange: onCam });
+    follow.addSlider(params.camera.waypoint, 'lookSmoothing', { min: 0.5, max: 12, step: 0.5, label: 'aim speed', onChange: onCam });
+    follow.addSlider(params.camera.waypoint, 'heightOffset', { min: -2, max: 2, step: 0.05, label: 'viewing height offset (m)', onChange: onCam });
+    follow.addSlider(params.camera.waypoint, 'deadzoneFrac', { min: 0.05, max: 1, step: 0.05, label: 'center deadzone', onChange: onCam });
+    follow.addSlider(params.camera.waypoint, 'minOrbDistance', { min: 0.3, max: 3, step: 0.1, label: 'min orb distance (m)', onChange: onCam });
+
+    cam.addSlider(params.camera, 'moveSpeed', { min: 0.5, max: 20, step: 0.5, label: 'move speed', onChange: onCam });
     cam.addSlider(params.camera, 'moveFastSpeed', { min: 1, max: 40, step: 0.5, label: 'fast speed', onChange: onCam });
     cam.addSlider(params.camera, 'rotateSpeed', { min: 0.05, max: 1, step: 0.05, label: 'look speed', onChange: onCam });
-    cam.addSlider(params.camera, 'renderScale', { min: 0.5, max: 2, step: 0.25, label: 'render scale', onChange: onCam });
     cam.addButton({ title: 'Frame orb (F)', onClick: () => hooks.frameOrb() });
 
-    const way = cam.addSection({ title: 'Anchor camera', expanded: false });
-    way.addSlider(params.camera.waypoint, 'railSmoothing', { min: 0.5, max: 8, step: 0.1, label: 'rail follow speed', onChange: onCam });
-    way.addSlider(params.camera.waypoint, 'parkBias', { min: 0, max: 1, step: 0.05, label: 'stick at corners', onChange: onCam });
-    way.addSlider(params.camera.waypoint, 'lookSmoothing', { min: 0.5, max: 12, step: 0.5, label: 'aim speed', onChange: onCam });
-    way.addSlider(params.camera.waypoint, 'heightOffset', { min: -2, max: 2, step: 0.05, label: 'viewing height offset (m)', onChange: onCam });
-    way.addSlider(params.camera.waypoint, 'deadzoneFrac', { min: 0.05, max: 1, step: 0.05, label: 'center deadzone', onChange: onCam });
-    way.addSlider(params.camera.waypoint, 'minOrbDistance', { min: 0.3, max: 3, step: 0.1, label: 'min orb distance (m)', onChange: onCam });
-
-    // Set each zone's camera position by hand: turn anchor follow off, fly the
+    // Set each zone's camera position by hand: turn Auto Follow off, fly the
     // camera to a good vantage, then click (or press the zone number key).
-    const place = way.addSection({ title: 'Set camera positions', expanded: true });
+    const place = cam.addSection({ title: 'Set camera positions', expanded: false });
     params.camera.anchors.forEach((anchor, i) => {
         place.addButton({ title: `Set "${anchor.name}" here (${i + 1})`, onClick: () => hooks.captureAnchor(i) });
     });
 
-    // --- See inside ---
-    const cut = panel.addSection({ title: 'See inside' });
-    cut.addSelect(params.cutaway, 'mode', { options: { Auto: 'auto', On: 'on', Off: 'off' } });
+    // --- See inside (cutaway / dollhouse) ---
+    const cut = panel.addPage({ id: 'seeinside', title: 'See inside' });
+    cut.addSelect(params.cutaway, 'mode', { label: 'mode', options: { Auto: 'auto', On: 'on', Off: 'off' } });
     cut.addSlider(params.cutaway, 'softness', { min: 0.05, max: 4, step: 0.05 });
     cut.addSlider(params.cutaway, 'engage', { min: 0.05, max: 3, step: 0.05, label: 'fade-in (m)' });
 
+    // --- Advanced (fine-tuning behind drill-in sub-pages) ---
+    const adv = panel.addPage({ id: 'advanced', title: 'Advanced' });
+
     // Per-side peel depth. x/z are the four walls, y is ceiling/floor. Adjust a
     // slider and watch which side opens up to learn the mapping for this room.
-    const peel = cut.addSection({ title: 'Wall peel (per side)', expanded: true });
+    const peel = adv.addPage({ id: 'wallpeel', title: 'Wall peel' });
     peel.addSlider(params.cutaway.wallPeels, 'xPos', { min: 0, max: 10, step: 0.1, label: 'wall +X' });
     peel.addSlider(params.cutaway.wallPeels, 'xNeg', { min: 0, max: 10, step: 0.1, label: 'wall -X' });
     peel.addSlider(params.cutaway.wallPeels, 'zPos', { min: 0, max: 10, step: 0.1, label: 'wall +Z' });
@@ -102,20 +111,10 @@ export function createSettingsPanel(params, hooks) {
     peel.addSlider(params.cutaway.wallPeels, 'yPos', { min: 0, max: 10, step: 0.1, label: 'ceiling' });
     peel.addSlider(params.cutaway.wallPeels, 'yNeg', { min: 0, max: 10, step: 0.1, label: 'floor' });
 
-    // --- Orb position source ---
-    const src = panel.addSection({ title: 'Orb Position Source' });
-    src.addSelect(params.source, 'mode', {
-        options: { 'Click to place': 'click', 'Demo path': 'demo', 'mmWave sensor': 'sensor' },
-        onChange: () => hooks.onSourceModeChanged()
-    });
-    src.addSlider(params.source, 'demoSpeed', { min: 0.05, max: 2, step: 0.05, label: 'demo speed (m/s)' });
-    src.addSlider(params.source, 'keyboardSpeed', { min: 0.5, max: 8, step: 0.5, label: 'arrow-key speed' });
-    src.addSlider(params.source, 'floorY', { min: -5, max: 5, step: 0.01, label: 'floor height' });
-
     // Demo-mode A* wander: avoidRadius is read live each frame; the grid
     // geometry sliders rebuild the occupancy grid via the hook.
-    const onNav = () => hooks.onNavChanged();
-    const demo = src.addSection({ title: 'Demo wander (A*)', expanded: false });
+    const demo = adv.addPage({ id: 'demotuning', title: 'Demo path' });
+    demo.addSlider(params.source, 'demoSpeed', { min: 0.05, max: 2, step: 0.05, label: 'demo speed (m/s)' });
     demo.addSlider(params.source.demo, 'avoidRadius', { min: 0.2, max: 2, step: 0.05, label: 'orb avoid radius (m)' });
     demo.addSlider(params.source.demo, 'gridCell', { min: 0.1, max: 0.5, step: 0.05, label: 'grid cell (m)', onChange: onNav });
     demo.addSlider(params.source.demo, 'clearance', { min: 0, max: 0.6, step: 0.05, label: 'obstacle clearance (m)', onChange: onNav });
@@ -123,26 +122,76 @@ export function createSettingsPanel(params, hooks) {
     demo.addSlider(params.source.demo, 'groundGap', { min: 0, max: 0.6, step: 0.05, label: 'grounded within (m)', onChange: onNav });
     demo.addSlider(params.source.demo, 'gapBridge', { min: 0, max: 0.6, step: 0.05, label: 'seal wall gaps (m)', onChange: onNav });
     demo.addSlider(params.source.demo, 'minPerBin', { min: 1, max: 20, step: 1, label: 'min splats per bin', onChange: onNav });
-    demo.addToggle(params.source.demo, 'showNavDebug', { label: 'show nav grid + paths' });
 
-    const sensor = src.addSection({ title: 'HLK mmWave (WebSocket)', expanded: false });
+    // Sensor calibration — origin/rotation/scale map sensor space to world space.
+    // (The live nav-grid / sensor overlay reveal is the root "under the hood"
+    // toggle; the mount sliders here fine-tune the overlay gizmo placement.)
+    const sensor = adv.addPage({ id: 'sensorcal', title: 'Sensor calibration' });
     sensor.addText(params.source.sensor, 'url', { label: 'url' });
     sensor.addSlider(params.source.sensor, 'originX', { min: -20, max: 20, step: 0.05, label: 'originX' });
     sensor.addSlider(params.source.sensor, 'originZ', { min: -20, max: 20, step: 0.05, label: 'originZ' });
     sensor.addSlider(params.source.sensor, 'rotationDeg', { min: -360, max: 360, step: 1, label: 'rotationDeg' });
     sensor.addSlider(params.source.sensor, 'scale', { min: 0.0001, max: 0.01, step: 0.0001, label: 'scale', format: (v) => v.toFixed(4) });
     sensor.addToggle(params.source.sensor, 'flipSensorY', { label: 'mirror Y' });
+    sensor.addSlider(params.source.sensor, 'mountHeight', { min: 0, max: 4, step: 0.05, label: 'mount height' });
+    sensor.addSlider(params.source.sensor, 'mountTilt', { min: 0, max: 60, step: 1, label: 'mount tilt (° down)' });
     sensor.addButton({ title: 'Connect', onClick: () => hooks.connectSensor() });
     sensor.addButton({ title: 'Disconnect', onClick: () => hooks.disconnectSensor() });
     sensor.addReadout({ label: 'status', get: () => hooks.sources.sensorStatus });
 
-    // Calibration overlay: show a gizmo of where the program thinks the sensor
-    // is (marker + facing + FOV cone) and a live line to the tracked object, so
-    // the originX/originZ/rotationDeg sliders above can be fine-tuned visually.
-    // (The sensor's own depth is metric — leave 'scale' at its mm→m default.)
-    sensor.addToggle(params.source.sensor, 'showOverlay', { label: 'show sensor overlay' });
-    sensor.addSlider(params.source.sensor, 'mountHeight', { min: 0, max: 4, step: 0.05, label: 'mount height' });
-    sensor.addSlider(params.source.sensor, 'mountTilt', { min: 0, max: 60, step: 1, label: 'mount tilt (° down)' });
+    // Rendering / misc.
+    const render = adv.addPage({ id: 'rendering', title: 'Rendering' });
+    render.addSlider(params.camera, 'renderScale', { min: 0.5, max: 2, step: 0.25, label: 'render scale', onChange: onCam });
+    render.addSlider(params.source, 'keyboardSpeed', { min: 0.5, max: 8, step: 0.5, label: 'arrow-key speed' });
+    render.addSlider(params.source, 'floorY', { min: -5, max: 5, step: 0.01, label: 'floor height' });
+
+    adv.addDrill({ label: 'Wall peel', page: peel });
+    adv.addDrill({ label: 'Demo path', page: demo });
+    adv.addDrill({ label: 'Sensor calibration', page: sensor });
+    adv.addDrill({ label: 'Rendering', page: render });
+
+    // ---- root page ---------------------------------------------------------
+    const root = panel.addPage({ id: 'root', title: 'Garage Viewer', root: true });
+
+    // Primary mode: Demo / Sensor are the two headline modes, plus click-to-place.
+    root.addSegmented(params.source, 'mode', {
+        options: { Demo: 'demo', Sensor: 'sensor', Click: 'click' },
+        onChange: () => { hooks.onSourceModeChanged(); syncModeUI(); }
+    });
+
+    // Mode-aware "show under the hood": nav grid in demo, sensor overlay in
+    // sensor, hidden in click. Backed by get/set functions since the target
+    // param changes with the mode.
+    const underHood = root.addToggleFn({
+        label: 'Show under the hood',
+        get: () => (params.source.mode === 'sensor'
+            ? params.source.sensor.showOverlay
+            : params.source.demo.showNavDebug),
+        set: (v) => {
+            if (params.source.mode === 'sensor') params.source.sensor.showOverlay = v;
+            else params.source.demo.showNavDebug = v;
+        }
+    });
+    function syncModeUI() {
+        const mode = params.source.mode;
+        underHood.setVisible(mode !== 'click');
+        underHood.setLabel(mode === 'sensor' ? 'Show sensor overlay' : 'Show nav grid');
+        // the toggle's target param changes with the mode — re-read so the switch
+        // reflects the actual state (e.g. overlay on by default in sensor mode)
+        underHood.sync();
+    }
+
+    root.addDrill({ label: 'Orb', page: orb });
+    root.addDrill({ label: 'Camera', page: cam });
+    root.addDrill({ label: 'See inside', page: cut });
+    root.addDrill({ label: 'Advanced', page: adv });
+
+    root.addButtonRow([
+        { title: 'Save (H)', onClick: () => hooks.saveSession() },
+        { title: 'Reset', onClick: () => hooks.resetToDefaults() }
+    ]);
+
+    syncModeUI();
 
     document.body.appendChild(panel.element);
     document.body.appendChild(fab);
@@ -153,7 +202,7 @@ export function createSettingsPanel(params, hooks) {
 
     return {
         element: panel.element,
-        refresh: () => panel.refresh(),
+        refresh: () => { panel.refresh(); syncModeUI(); },
         toggle
     };
 }

@@ -23,7 +23,7 @@
       "rotateSpeed": 0.25,
       "renderScale": 1.5,
       "waypoint": {
-        "railSmoothing": 2.5,
+        "railSmoothing": 0.5,
         "lookSmoothing": 4.0,
         "parkBias": 1,
         "heightOffset": 0,
@@ -70,7 +70,7 @@
       "bloomBlur": 4
     },
     "source": {
-      "mode": "click",
+      "mode": "demo",
       "keyboardSpeed": 2.5,
       "demoSpeed": 0.35,
       "floorY": -0.5484,

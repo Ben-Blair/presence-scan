@@ -35,6 +35,7 @@ import { WaypointCamera } from './waypoint-camera.js';
 import { SensorMinimap } from './sensor-minimap.js';
 import { SensorOverlay } from './sensor-overlay.js';
 import { createSettingsPanel } from './settings.js';
+import { createKeybindingsBar } from './keybindings-bar.js';
 import { isTypingInPanel } from './dom-utils.js';
 
 const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('app-canvas'));
@@ -262,8 +263,8 @@ function buildScene() {
         console.info('Saved settings for next load (view + controls). Reload to apply.');
     };
 
-    // capture the current camera position as a zone's anchor eye. Turn anchor
-    // follow OFF, fly the manual camera to an ideal vantage, then capture (zone
+    // capture the current camera position as a zone's anchor eye. Turn Auto
+    // Follow OFF, fly the manual camera to an ideal vantage, then capture (zone
     // number key, or the panel button). Persists via the session store.
     const captureAnchor = (i) => {
         const anchor = params.camera.anchors[i];
@@ -272,7 +273,7 @@ function buildScene() {
             return;
         }
         if (params.camera.orbitOrb) {
-            console.warn('Turn "anchor follow" off before capturing — the camera is auto-driven while it is on.');
+            console.warn('Turn "Auto Follow" off before capturing — the camera is auto-driven while it is on.');
             return;
         }
         const p = camera.getPosition();
@@ -350,6 +351,9 @@ function buildScene() {
     // minimap, help, in-scene sensor gizmo), leaving just the splat + orb.
     const displayMode = createDisplayToggle();
 
+    // dynamic keybindings hint bar (rebuilds only when mode / auto-follow change)
+    const helpBar = createKeybindingsBar(params);
+
     // ---------------------------------------------------------- hotkeys
     wireHotkeys({ pane, controls, orb, displayMode, captureAnchor, saveCurrentSession });
 
@@ -370,12 +374,13 @@ function buildScene() {
     app.on('update', (dt) => {
         sources.update(dt);
         field.update(dt, params.orb.smoothing);
+        helpBar.update();
         if (!displayMode.on) {
             sensorOverlay.update();
             navDebug.update();
         }
 
-        // anchor follow mode: drive the camera automatically (suspends the
+        // Auto Follow mode: drive the camera automatically (suspends the
         // manual CameraControls while active)
         if (params.camera.orbitOrb !== autoCam.active) {
             if (params.camera.orbitOrb) {
@@ -388,7 +393,7 @@ function buildScene() {
 
         const camPos = camera.getPosition();
 
-        // cutaway state. While anchor follow drives the camera we want a solid
+        // cutaway state. While Auto Follow drives the camera we want a solid
         // interior view, so auto-cutaway is suppressed (it would peel the walls
         // and make the room look like a see-through box from outside).
         const outside = !roomBox.containsPoint(camPos);

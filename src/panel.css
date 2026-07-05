@@ -50,17 +50,41 @@
     flex: 0 0 auto;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 4px;
     padding: 12px 14px;
     border-bottom: 1px solid var(--cp-border);
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent);
 }
 .cp__title {
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 13px;
     font-weight: 600;
     letter-spacing: 0.02em;
     color: var(--cp-fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
+/* Back chevron — hidden on the root page, shown on drill-in sub-pages. */
+.cp__back {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--cp-accent);
+    font-size: 22px;
+    line-height: 1;
+    width: 0;
+    height: 26px;
+    padding: 0;
+    overflow: hidden;
+    opacity: 0;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.15s ease, width 0.18s ease, opacity 0.18s ease;
+}
+.cp__back--show { width: 26px; opacity: 1; }
+.cp__back:hover { background: var(--cp-bg-raised); }
 .cp__hide {
     appearance: none;
     border: none;
@@ -76,24 +100,106 @@
 }
 .cp__hide:hover { background: var(--cp-bg-raised); color: var(--cp-fg); }
 
-/* Scrollable body ----------------------------------------------------- */
-.cp__body {
-    flex: 1 1 auto;
+/* Page stack ---------------------------------------------------------- */
+/* The pages container clips a horizontal stack of sub-pages. Each page owns
+   its own scroll; drilling in/out slides pages left/right (iOS-style). */
+.cp__pages {
+    position: relative;
+    flex: 0 0 auto;
+    min-height: 0;
+    overflow: hidden;
+    transition: height 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.cp-page {
+    position: absolute;
+    inset: 0;
     overflow-y: auto;
     overflow-x: hidden;
     padding: 8px 10px 12px;
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
     scrollbar-width: thin;
     scrollbar-color: rgba(143, 208, 255, 0.4) transparent;
 }
-.cp__body::-webkit-scrollbar { width: 9px; }
-.cp__body::-webkit-scrollbar-track { background: transparent; }
-.cp__body::-webkit-scrollbar-thumb {
+/* active page centred; parent pages pushed left + dimmed; unvisited off-right */
+.cp-page--active { transform: translateX(0); opacity: 1; }
+.cp-page--behind { transform: translateX(-28%); opacity: 0; pointer-events: none; }
+.cp-page--ahead { transform: translateX(100%); opacity: 0; pointer-events: none; }
+.cp-page::-webkit-scrollbar { width: 9px; }
+.cp-page::-webkit-scrollbar-track { background: transparent; }
+.cp-page::-webkit-scrollbar-thumb {
     background: rgba(143, 208, 255, 0.28);
     border-radius: 6px;
     border: 2px solid transparent;
     background-clip: content-box;
 }
-.cp__body::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: rgba(143, 208, 255, 0.5); }
+.cp-page::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: rgba(143, 208, 255, 0.5); }
+
+/* Segmented (mode) control ------------------------------------------- */
+.cp-seg {
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    margin: 6px 0 10px;
+    border: 1px solid var(--cp-border);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.22);
+}
+.cp-seg__btn {
+    appearance: none;
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 7px 4px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--cp-fg-dim);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.cp-seg__btn:hover { color: var(--cp-fg); }
+.cp-seg__btn--on {
+    background: rgba(25, 160, 255, 0.32);
+    color: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+/* Drill-in disclosure row -------------------------------------------- */
+.cp-drill {
+    appearance: none;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 12px;
+    margin: 5px 0;
+    border: 1px solid var(--cp-border);
+    border-radius: 10px;
+    background: var(--cp-bg-raised);
+    color: var(--cp-fg);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.cp-drill:hover { background: rgba(25, 160, 255, 0.12); border-color: var(--cp-accent-strong); }
+.cp-drill__label { flex: 1 1 auto; min-width: 0; }
+.cp-drill__value {
+    flex: 0 0 auto;
+    color: var(--cp-accent);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+.cp-drill__chevron { flex: 0 0 auto; color: var(--cp-fg-dim); font-size: 16px; line-height: 1; }
+
+/* Button row (equal-width, e.g. Save / Reset) ------------------------- */
+.cp-btnrow { display: flex; gap: 8px; margin: 8px 0 2px; }
+.cp-btnrow .cp-btn { margin: 0; }
 
 /* Sections ------------------------------------------------------------ */
 .cp-sec {
@@ -152,6 +258,9 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
+/* Toggle rows put the switch hard-right, so the label can take the freed space
+   instead of being clipped at 40% (fixes "show sensor overlay" truncation). */
+.cp-row--toggle .cp-row__label { flex: 1 1 auto; }
 
 /* Slider -------------------------------------------------------------- */
 .cp-slider {
@@ -353,6 +462,33 @@
 }
 .radar-minimap--on { display: block; }
 .radar-minimap canvas { display: block; }
+
+/* Keybindings hint bar (bottom-left) --------------------------------- */
+/* Built dynamically in keybindings-bar.js, listing only the shortcuts that
+   apply to the current mode / camera state. Sits in the corner; lifts above
+   the radar minimap only while the minimap is actually shown (sensor mode) —
+   `body.minimap-on` is toggled alongside `.radar-minimap--on`. */
+#help {
+    position: fixed;
+    left: 12px;
+    bottom: 12px;
+    max-width: min(560px, calc(100vw - 24px));
+    color: rgba(232, 232, 240, 0.75);
+    background: rgba(10, 10, 18, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 9px 13px;
+    font-size: 12px;
+    line-height: 1.7;
+    z-index: 50;
+    user-select: none;
+    transition: bottom 0.2s ease;
+}
+#help b { color: var(--accent); font-weight: 600; }
+#help:empty { display: none; }
+body.minimap-on #help { bottom: 260px; }
 
 /* Display mode ------------------------------------------------------- */
 /* Clean presentation view: hide every on-screen overlay so only the splat
