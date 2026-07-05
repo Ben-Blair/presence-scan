@@ -385,6 +385,11 @@ body.display-mode .radar-minimap { display: none !important; }
 }
 .display-fab:hover { background: rgba(25, 160, 255, 0.2); }
 .display-fab:active { transform: scale(0.94); }
-/* In display mode the toggle stays reachable but recedes until hovered. */
-body.display-mode .display-fab { opacity: 0.12; }
-body.display-mode .display-fab:hover { opacity: 1; }
+/* In display mode keep the exit toggle fully visible with a solid surface. */
+body.display-mode .display-fab {
+    opacity: 1;
+    background: rgb(12, 13, 20);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+body.display-mode .display-fab:hover { background: rgb(25, 28, 38); }

@@ -77,7 +77,7 @@
       "demo": {
         "orbCount": 1,
         "gridCell": 0.2,
-        "clearance": 0.25,
+        "clearance": 0,
         "avoidRadius": 0.6,
         "floorOffset": 0,
         "minPerBin": 2,
