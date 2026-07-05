@@ -239,7 +239,7 @@ describe('DemoWander', () => {
         expect(w.states[0].goal).not.toBeNull();
     });
 
-    it('moves smoothly: bounded step length and never doubles back', () => {
+    it('holds a bounded step length and roams to every corner of the room', () => {
         const grid = gridFrom(EMPTY_10x10);
         const params = makeParams();
         params.source.demo.orbCount = 1;
@@ -247,30 +247,20 @@ describe('DemoWander', () => {
         w.reset(new Vec3(5, 0, 5));
         const dt = 1 / 60;
         const speed = params.source.demoSpeed;
-        // worst per-frame turn: a forward-biased goal transition (heading·dir
-        // ≥ AHEAD_DOT = 0.2 → ≤ ~78°); path corners are subdivided far finer
-        const maxTurn = Math.acos(0.2) + 0.05;
-        let prev = w.states[0].pos.clone();
-        let prevDir = null;
-        for (let f = 0; f < 3000; f++) {
+        const visited = new Set();
+        const prev = w.states[0].pos.clone();
+        for (let f = 0; f < 20000; f++) {
             w.update(dt);
             const p = w.states[0].pos;
-            const dx = p.x - prev.x;
-            const dz = p.z - prev.z;
-            const step = Math.hypot(dx, dz);
-            expect(step).toBeLessThanOrEqual(speed * dt + 1e-9);
-            if (step > 1e-9) {
-                const dir = Math.atan2(dz, dx);
-                if (prevDir !== null) {
-                    expect(Math.abs(wrapAngle(dir - prevDir))).toBeLessThanOrEqual(maxTurn);
-                }
-                prevDir = dir;
-            } else {
-                // a pause (deliberate stop-and-turn) resets the continuity check
-                prevDir = null;
-            }
+            // constant-speed follow: never teleports more than one step
+            expect(Math.hypot(p.x - prev.x, p.z - prev.z)).toBeLessThanOrEqual(speed * dt + 1e-9);
+            const c = worldToCell(grid, p.x, p.z);
+            visited.add(c.cz * grid.cols + c.cx);
             prev.copy(p);
         }
+        // free-roaming (un-biased) goals eventually reach nearly every one of
+        // the 100 cells — the whole point of dropping the forward bias
+        expect(visited.size).toBeGreaterThan(90);
     });
 
     it('never pauses to turn around at a dead end — chains a reversal instead', () => {
@@ -331,26 +321,15 @@ describe('DemoWander', () => {
         expect(w._pathConflicts(s, 1)).toBe(false);
     });
 
-    it('constrains goals to the wall-peel box only while cutaway is engaged', () => {
+    it('roams the full room, ignoring the cutaway wall-peel depths', () => {
+        // the demo used to inset the goal box by the wall peels while the
+        // cutaway was engaged, confining the orb to a small central pocket;
+        // it now roams the whole floor regardless of the peels
         const grid = gridFrom(EMPTY_10x10);
         const params = makeParams();
-        params.cutaway.wallPeels.xPos = 6; // peel away the +X side of the room
+        params.cutaway.wallPeels.xPos = 6; // would peel away most of the +X side
         const w = new DemoWander(grid, params, boundsFor(grid), makeRng(3));
-        w.reset(new Vec3(1.5, 0, 5.5), true);
-        for (let step = 0; step < 500; step++) w.update(1 / 60, true);
-        for (const s of w.states) {
-            expect(s.goal).not.toBeNull();
-            const { x } = cellToWorld(grid, s.goal.cx, s.goal.cz);
-            expect(x).toBeLessThanOrEqual(boundsFor(grid).center.x + boundsFor(grid).halfExtents.x - 6);
-        }
-    });
-
-    it('ignores the wall-peel box when cutaway is not engaged', () => {
-        const grid = gridFrom(EMPTY_10x10);
-        const params = makeParams();
-        params.cutaway.wallPeels.xPos = 6; // would peel away the +X side, if engaged
-        const w = new DemoWander(grid, params, boundsFor(grid), makeRng(3));
-        w.reset(new Vec3(1.5, 0, 5.5)); // cutOn defaults to false
+        w.reset(new Vec3(1.5, 0, 5.5));
         for (let step = 0; step < 500; step++) w.update(1 / 60);
         const peelLimit = boundsFor(grid).center.x + boundsFor(grid).halfExtents.x - 6;
         expect(w.states.some((s) => cellToWorld(grid, s.goal.cx, s.goal.cz).x > peelLimit)).toBe(true);

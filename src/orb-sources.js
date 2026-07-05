@@ -1,6 +1,6 @@
-import { Vec3, Ray, Plane, BoundingBox, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_SHIFT } from 'playcanvas';
+import { Vec3, Ray, Plane, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_SHIFT } from 'playcanvas';
 import { isTypingInPanel } from './dom-utils.js';
-import { DEG_TO_RAD, clampToRoomXZ, CUTAWAY_ENGAGE_MARGIN } from './math-utils.js';
+import { DEG_TO_RAD, clampToRoomXZ } from './math-utils.js';
 import { DemoWander } from './demo-wander.js';
 
 const tmpRay = new Ray();
@@ -69,14 +69,6 @@ export class OrbSources {
         this.params = params;
         this.roomBounds = roomBounds;
         this.demoWander = new DemoWander(navGrid, params, roomBounds);
-        // mirrors main.js's own outside-the-room test, so demo wander only
-        // avoids the wall-peeled zone when the cutaway effect is actually
-        // hiding it (see _isCutawayActive)
-        this._cutawayRoomBox = new BoundingBox(
-            roomBounds.center.clone(),
-            roomBounds.halfExtents.clone().add(
-                new Vec3(CUTAWAY_ENGAGE_MARGIN, CUTAWAY_ENGAGE_MARGIN, CUTAWAY_ENGAGE_MARGIN))
-        );
         this._lastMode = null;
         this.socket = null;
         this.sensorStatus = 'disconnected';
@@ -95,21 +87,7 @@ export class OrbSources {
 
     /** Swap in a rebuilt nav grid (cell size / clearance retuned in the panel). */
     setNavGrid(navGrid) {
-        this.demoWander.setGrid(navGrid, this._isCutawayActive());
-    }
-
-    /**
-     * Whether the splat cutaway (wall-peel) effect is actually rendering right
-     * now — mirrors main.js's own per-frame `cutOn` (anchor-follow suppresses
-     * it; 'auto' only engages once the camera is clearly outside the room).
-     * Demo wander uses this so it only avoids the peeled-away zone while it's
-     * genuinely invisible, instead of always treating the room as peeled.
-     */
-    _isCutawayActive() {
-        const mode = this.params.cutaway.mode;
-        if (mode === 'off' || this.params.camera.orbitOrb) return false;
-        if (mode === 'on') return true;
-        return !this._cutawayRoomBox.containsPoint(this.camera.getPosition());
+        this.demoWander.setGrid(navGrid);
     }
 
     /**
@@ -248,13 +226,12 @@ export class OrbSources {
 
     update(dt) {
         if (this.params.source.mode === 'demo') {
-            const cutOn = this._isCutawayActive();
             // A* wander: on mode entry (re)spawn the orbs from wherever the
             // primary stands, then let the wander controller drive all of them
             if (this._lastMode !== 'demo') {
-                this.demoWander.reset(this.field.primary().getPosition(), cutOn);
+                this.demoWander.reset(this.field.primary().getPosition());
             }
-            this.field.setTargets(this.demoWander.update(dt, cutOn));
+            this.field.setTargets(this.demoWander.update(dt));
         } else if (this.params.source.mode === 'click') {
             this.field.collapseToPrimary();
             // keep the orb riding the travel plane even when no arrow key is

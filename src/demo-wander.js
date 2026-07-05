@@ -2,12 +2,13 @@
 // Each orb repeatedly samples a random reachable goal, plans with A*, string-
 // pulls the path, rounds its corners with collision-checked Bezier arcs
 // (`roundCorners`), and follows the result at a constant speed — so motion
-// flows in smooth curves rather than polyline kinks. New goals are biased to
-// lie roughly ahead of the current travel direction, so the wander keeps
-// moving forward instead of bouncing back and forth between random targets.
-// The next goal is chained on shortly before the orb reaches its current one
-// (falling back to any reachable goal, ahead or not, right at the end) so it
-// never stops mid-wander — a sharp turn beats a pause.
+// flows in smooth curves rather than polyline kinks. Each goal is drawn
+// uniformly at random from anywhere reachable, subject only to being at least
+// MIN_GOAL_DIST from the current one, so over time the orb visits every crevice
+// of the map rather than favouring one heading. The next goal is chained on
+// shortly before the orb reaches its current one so it never stops mid-wander;
+// when the resulting junction turns too sharply to round, the orb arrives and
+// pivots to the fresh goal (a crisp turn, never a stall).
 // With more than one orb, avoidance is mutual: every orb plans around the
 // other orbs' current positions (cells near them become a temporary blocked
 // overlay) and replans when another orb wanders onto its remaining path; an
@@ -30,7 +31,6 @@ const GOAL_TRIES = 20;
 const CORNER_RADIUS = 0.35;         // m — how far before/after a corner the arc starts
 const AHEAD_DOT = 0.2;              // goal direction · heading for "roughly ahead"
 const CHAIN_DIST = 0.9;             // m — remaining path length that triggers chaining
-const CHAIN_FALLBACK_DIST = 0.3;    // m — inside this, chaining accepts any goal, not just ahead ones
 
 /** Wrap an angle into (-π, π]. */
 export function wrapAngle(a) {
@@ -204,7 +204,6 @@ function pointSegDistSq(px, pz, ax, az, bx, bz) {
 /**
  * @typedef {Object} WanderState
  * @property {Vec3} pos - the orb's target point riding along the path
- * @property {number} heading - last travel direction (radians, atan2(z, x))
  * @property {Vec3[]} path - remaining world-space waypoints
  * @property {number} waypointIdx
  * @property {{cx:number, cz:number} | null} goal
@@ -235,26 +234,16 @@ export class DemoWander {
     }
 
     /**
-     * The wander box: the full room (inset by a small fixed margin) normally,
-     * so the orb explores everywhere it's visible. Only when the cutaway
-     * effect is actually peeling the walls back (`cutOn`) is it further inset
-     * by the wall-peel depths, matching the old lissajous demo's constraint so
-     * the orb stays in the still-rendered part of the dollhouse view. Null
-     * when the (peeled) box leaves no room.
-     *
-     * @param {boolean} [cutOn] - whether cutaway is currently engaged
+     * The wander box: the whole room, inset only by a small fixed margin, so
+     * the orb explores every corner it can reach. (It used to shrink to the
+     * wall-peel box while the cutaway was engaged — inherited from the old
+     * lissajous demo to keep the orb in the still-rendered center — but that
+     * confined it to a small central pocket, so the demo now roams the full
+     * floor regardless of the cutaway.) Null when the room leaves no room.
      */
-    _goalBox(cutOn) {
+    _goalBox() {
         const b = insetBoundsXZ(this.roomBounds.center, this.roomBounds.halfExtents, 0.15);
-        if (!cutOn) return (b.minX < b.maxX && b.minZ < b.maxZ) ? b : null;
-        const wp = this.params.cutaway.wallPeels;
-        const box = {
-            minX: b.minX + (wp.xNeg ?? 0),
-            maxX: b.maxX - (wp.xPos ?? 0),
-            minZ: b.minZ + (wp.zNeg ?? 0),
-            maxZ: b.maxZ - (wp.zPos ?? 0)
-        };
-        return (box.minX < box.maxX && box.minZ < box.maxZ) ? box : null;
+        return (b.minX < b.maxX && b.minZ < b.maxZ) ? b : null;
     }
 
     /**
@@ -262,11 +251,10 @@ export class DemoWander {
      * where the orbs stand.
      *
      * @param {NavGrid} grid
-     * @param {boolean} [cutOn] - whether cutaway is currently engaged
      */
-    setGrid(grid, cutOn = false) {
+    setGrid(grid) {
         this.grid = grid;
-        if (this.states.length) this.reset(this.states[0].pos, cutOn);
+        if (this.states.length) this.reset(this.states[0].pos);
     }
 
     /**
@@ -275,9 +263,8 @@ export class DemoWander {
      * later orbs spawn on random reachable cells clear of the ones before.
      *
      * @param {{x:number, y:number, z:number}} primaryPos
-     * @param {boolean} [cutOn] - whether cutaway is currently engaged
      */
-    reset(primaryPos, cutOn = false) {
+    reset(primaryPos) {
         const demo = this.params.source.demo;
         const n = Math.min(3, Math.max(1, Math.round(demo.orbCount)));
         const y = this._travelY;
@@ -298,7 +285,7 @@ export class DemoWander {
                 minDist: Math.max(demo.avoidRadius, 1),
                 avoid: this.states.map((s) => s.pos),
                 avoidRadius: demo.avoidRadius,
-                box: this._goalBox(cutOn)
+                box: this._goalBox()
             });
             const w = spawn
                 ? cellToWorld(this.grid, spawn.cx, spawn.cz)
@@ -311,7 +298,6 @@ export class DemoWander {
     _makeState(pos) {
         return {
             pos,
-            heading: wrapAngle(this.rng() * 2 * Math.PI),
             path: [],
             waypointIdx: 0,
             goal: null,
@@ -325,10 +311,9 @@ export class DemoWander {
      * `OrbField.setTargets()` (the returned Vec3s are copied by the field).
      *
      * @param {number} dt
-     * @param {boolean} [cutOn] - whether cutaway is currently engaged
      * @returns {Vec3[]}
      */
-    update(dt, cutOn = false) {
+    update(dt) {
         const speed = this.params.source.demoSpeed;
         const y = this._travelY;
 
@@ -362,49 +347,43 @@ export class DemoWander {
                 // being hit in the middle of ordinary wandering. Pick a fresh
                 // goal and plan; whatever direction it sets off in, keep
                 // moving the same frame rather than pausing to turn.
-                const goal = this._sampleGoalFor(s, s.pos, s.heading, overlay, false, cutOn);
+                const goal = this._sampleGoalFor(s, s.pos, overlay);
                 if (!goal || !this._plan(s, goal, overlay)) {
                     s.idle = RETRY_DELAY;
                     continue;
                 }
             } else if (s.goal && s.path.length >= 2 && this._remaining(s) < CHAIN_DIST) {
-                // nearly there: chain the next goal on *before* arriving, so
-                // the orb is never left without a path to follow. An ahead
-                // goal keeps the junction an interior corner that roundCorners
-                // turns into an arc; once we're within CHAIN_FALLBACK_DIST and
-                // still haven't found one (cornered), any reachable goal will
-                // do — a sharp turn beats stopping.
+                // nearly there: chain the next goal on *before* arriving, so the
+                // orb is never left without a path to follow. The goal is drawn
+                // at random from anywhere reachable (≥ MIN_GOAL_DIST off), so the
+                // junction may turn any way; _plan only appends the leg when the
+                // turn stays arc-roundable, else the orb arrives and pivots to
+                // the fresh goal next frame — a crisp turn, never a stall.
                 const end = s.path[s.path.length - 1];
-                const prev = s.path[s.path.length - 2];
-                const endDir = Math.atan2(end.z - prev.z, end.x - prev.x);
-                const requireAhead = this._remaining(s) > CHAIN_FALLBACK_DIST;
-                const next = this._sampleGoalFor(s, end, endDir, overlay, requireAhead, cutOn);
+                const next = this._sampleGoalFor(s, end, overlay);
                 if (next) this._plan(s, s.goal, overlay, next);
             }
 
-            const px = s.pos.x;
-            const pz = s.pos.z;
             s.waypointIdx = advanceAlongPath(s.path, s.waypointIdx, s.pos, speed * dt);
-            // track the travel direction for forward-biased goal sampling
-            const dx = s.pos.x - px;
-            const dz = s.pos.z - pz;
-            if (dx * dx + dz * dz > 1e-12) s.heading = Math.atan2(dz, dx);
         }
         return this.states.map((s) => s.pos);
     }
 
-    /** Sample the next wander goal for orb `s`, seen from `from` facing `heading`. */
-    _sampleGoalFor(s, from, heading, overlay, requireAhead, cutOn) {
+    /**
+     * Sample the next wander goal for orb `s`: a uniformly-random reachable
+     * cell at least MIN_GOAL_DIST from `from`, clear of the other orbs and
+     * inside the goal box. No forward bias — free-roaming goals are what let
+     * the orb eventually reach every corner of the room.
+     */
+    _sampleGoalFor(s, from, overlay) {
         return sampleGoal(this.grid, this.reachable, this.rng, {
             from,
             minDist: MIN_GOAL_DIST,
-            heading,
-            requireAhead,
             avoid: this.states.filter((o) => o !== s).map((o) => (o.goal
                 ? cellToWorld(this.grid, o.goal.cx, o.goal.cz)
                 : { x: o.pos.x, z: o.pos.z })),
             avoidRadius: this.params.source.demo.avoidRadius,
-            box: this._goalBox(cutOn),
+            box: this._goalBox(),
             overlay
         });
     }
