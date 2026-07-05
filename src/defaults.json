@@ -25,7 +25,7 @@
       "waypoint": {
         "railSmoothing": 2.5,
         "lookSmoothing": 4.0,
-        "parkBias": 0.6,
+        "parkBias": 1,
         "heightOffset": 0,
         "deadzoneFrac": 0.6,
         "minOrbDistance": 2.1
