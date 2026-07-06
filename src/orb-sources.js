@@ -2,6 +2,7 @@ import { Vec3, Ray, Plane, KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN, KEY_SHIFT } fr
 import { isTypingInPanel } from './dom-utils.js';
 import { DEG_TO_RAD, clampToRoomXZ } from './math-utils.js';
 import { DemoWander } from './demo-wander.js';
+import { OneEuroFilter1D } from './one-euro-filter.js';
 
 const tmpRay = new Ray();
 const tmpPlane = new Plane();
@@ -18,6 +19,14 @@ const tmpPlaneOrigin = new Vec3();
 // with an exponentially growing delay (reset on a successful open).
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 8000;
+
+const MAX_SENSOR_SLOTS = 3; // mirrors OrbField's MAX_ORBS — LD2450 tracks up to 3 targets
+// A gap longer than this between packets means the derivative estimate can no
+// longer be trusted (e.g. after a reconnect) — treat it like a fresh slot.
+const MAX_FILTER_DT = 0.5;
+// One Euro Filter's derivative-smoothing cutoff — fixed per the reference
+// implementation, rarely worth exposing as a tunable.
+const FILTER_D_CUTOFF = 1.0;
 
 /**
  * Parse a sensor WebSocket payload into an array of `{ x, y }` targets in mm.
@@ -80,6 +89,13 @@ export class OrbSources {
         this._reconnectTimer = null;
         this._reconnectDelay = RECONNECT_BASE_MS;
         this._malformedCount = 0;        // diagnostics: packets we couldn't parse
+        // per-slot One Euro filters smoothing raw sensor-space {x,y} noise before
+        // sensorToWorld() — orb i always tracks LD2450 slot i (see class doc)
+        this._filters = Array.from({ length: MAX_SENSOR_SLOTS }, () => ({
+            x: new OneEuroFilter1D(), y: new OneEuroFilter1D()
+        }));
+        this._slotActive = new Array(MAX_SENSOR_SLOTS).fill(false);
+        this._lastSensorMsgTime = null;
 
         const canvas = app.graphicsDevice.canvas;
         canvas.addEventListener('dblclick', (e) => this.onDoubleClick(e));
@@ -128,7 +144,14 @@ export class OrbSources {
         // drop any extra orbs the sensor had spawned and clear the diagnostics
         this.lastTargets = [];
         this.field.collapseToPrimary();
+        this._resetFilterState();
         this._setStatus('disconnected');
+    }
+
+    /** Forget per-slot filter history so the next packet starts every slot fresh. */
+    _resetFilterState() {
+        this._slotActive.fill(false);
+        this._lastSensorMsgTime = null;
     }
 
     _setStatus(status) {
@@ -161,8 +184,9 @@ export class OrbSources {
                 }
                 const now = performance.now();
                 this.lastTargets = raw.map((t) => ({ x: t.x, y: t.y, t: now }));
+                const filtered = this._filterTargets(raw, now);
                 // clone: sensorToWorld returns a shared temp, reused each call
-                this.field.setTargets(raw.map((t) => this.sensorToWorld(t.x, t.y).clone()));
+                this.field.setTargets(filtered.map((t) => this.sensorToWorld(t.x, t.y).clone()));
             };
         } catch {
             // synchronous failure (e.g. a malformed URL) — report and retry
@@ -178,6 +202,7 @@ export class OrbSources {
             this.socket.onerror = this.socket.onmessage = null;
             this.socket = null;
         }
+        this._resetFilterState();
         if (!this._wantConnected) {
             this._setStatus('disconnected');
             return;
@@ -205,6 +230,48 @@ export class OrbSources {
             clearTimeout(this._reconnectTimer);
             this._reconnectTimer = null;
         }
+    }
+
+    /**
+     * Smooth raw sensor-space targets through each slot's One Euro filter pair
+     * before calibration. A slot resets (snaps, no lag) instead of filtering
+     * whenever it just appeared or the gap since the last packet is too long
+     * to trust the derivative estimate across — mirroring `OrbField`'s own
+     * teleport-on-activation for a freshly (re)appearing target.
+     *
+     * @param {{x:number, y:number}[]} raw
+     * @param {number} now - performance.now() at packet arrival
+     * @returns {{x:number, y:number}[]}
+     */
+    _filterTargets(raw, now) {
+        const s = this.params.source.sensor;
+        const dt = this._lastSensorMsgTime === null ? null : (now - this._lastSensorMsgTime) / 1000;
+        this._lastSensorMsgTime = now;
+
+        if (!s.filterEnabled) {
+            this._resetFilterState();
+            return raw;
+        }
+
+        const minCutoff = s.filterMinCutoff;
+        const beta = s.filterBeta;
+        const filtered = raw.map((t, i) => {
+            const f = this._filters[i];
+            if (!f) return { x: t.x, y: t.y }; // beyond tracked slot count (firmware caps at 3)
+            const canFilter = this._slotActive[i] && dt !== null && dt > 0 && dt <= MAX_FILTER_DT;
+            if (canFilter) {
+                return {
+                    x: f.x.filter(t.x, dt, minCutoff, beta, FILTER_D_CUTOFF),
+                    y: f.y.filter(t.y, dt, minCutoff, beta, FILTER_D_CUTOFF)
+                };
+            }
+            f.x.reset(t.x);
+            f.y.reset(t.y);
+            return { x: t.x, y: t.y };
+        });
+
+        for (let i = 0; i < MAX_SENSOR_SLOTS; i++) this._slotActive[i] = i < raw.length;
+        return filtered;
     }
 
     /** Map sensor-space (mm, sensor at origin) to world space via calibration. */

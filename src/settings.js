@@ -134,7 +134,15 @@ export function createSettingsPanel(params, hooks) {
     sensor.addSlider(params.source.sensor, 'scale', { min: 0.0001, max: 0.01, step: 0.0001, label: 'scale', format: (v) => v.toFixed(4) });
     sensor.addToggle(params.source.sensor, 'flipSensorY', { label: 'mirror Y' });
     sensor.addSlider(params.source.sensor, 'mountHeight', { min: 0, max: 4, step: 0.05, label: 'mount height' });
-    sensor.addSlider(params.source.sensor, 'mountTilt', { min: 0, max: 60, step: 1, label: 'mount tilt (° down)' });
+    sensor.addSlider(params.source.sensor, 'mountTilt', { min: -60, max: 60, step: 1, label: 'mount tilt (° down)' });
+    // One Euro Filter smoothing raw radar jitter before it becomes an orb
+    // target: cutoff rises with estimated speed, so it tracks real movement
+    // with little lag while damping jitter hard when nearly still, with no
+    // velocity "memory" to overshoot past where the person actually stopped.
+    // Starting guesses — hand-tune live while walking around.
+    sensor.addToggle(params.source.sensor, 'filterEnabled', { label: 'smooth (1€ filter)' });
+    sensor.addSlider(params.source.sensor, 'filterMinCutoff', { min: 0.05, max: 5, step: 0.05, label: 'min cutoff (Hz)' });
+    sensor.addSlider(params.source.sensor, 'filterBeta', { min: 0, max: 0.05, step: 0.001, label: 'beta (speed coeff)' });
     sensor.addButton({ title: 'Connect', onClick: () => hooks.connectSensor() });
     sensor.addButton({ title: 'Disconnect', onClick: () => hooks.disconnectSensor() });
     sensor.addReadout({ label: 'status', get: () => hooks.sources.sensorStatus });

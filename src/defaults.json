@@ -94,7 +94,10 @@
         "flipSensorY": false,
         "showOverlay": true,
         "mountHeight": 1.35,
-        "mountTilt": 0
+        "mountTilt": 0,
+        "filterEnabled": true,
+        "filterMinCutoff": 0.5,
+        "filterBeta": 0.007
       }
     }
   }
