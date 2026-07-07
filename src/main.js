@@ -26,6 +26,7 @@ import { CameraControls } from './camera-controls.js';
 import { params } from './params.js';
 import { applyParams, resolveStartup, resetToDefaults, saveSession } from './settings-store.js';
 import { OrbField } from './orb-field.js';
+import { CharacterField } from './character.js';
 import { SplatFX } from './splat-effects.js';
 import { OrbSources } from './orb-sources.js';
 import { buildNavGridFromColumns, emptyGrid, estimateFloorY } from './nav-grid.js';
@@ -60,7 +61,12 @@ canvas.addEventListener('contextmenu', e => e.preventDefault());
 
 const assets = {
     garage: new Asset('garage', 'gsplat', { url: 'assets/garage.sog' }),
-    collision: new Asset('collision', 'container', { url: 'assets/garagecollisionmesh.glb' })
+    collision: new Asset('collision', 'container', { url: 'assets/garagecollisionmesh.glb' }),
+    // walking-character representation (optional; toggled in settings). The
+    // bitmoji mesh + separate idle/walk clips retarget onto it by joint name.
+    bitmoji: new Asset('bitmoji', 'container', { url: 'assets/character/bitmoji.glb' }),
+    charIdle: new Asset('char-idle', 'container', { url: 'assets/character/idle.glb' }),
+    charWalk: new Asset('char-walk', 'container', { url: 'assets/character/walk.glb' })
 };
 
 let loaded = 0;
@@ -240,6 +246,25 @@ function buildScene() {
     // ---------------------------------------------------------- orb sources
     const sources = new OrbSources(app, camera, field, params, { center, halfExtents }, navGrid);
 
+    // ---------------------------------------------------------- character
+    // Optional walking-avatar representation: a universal orb<->character switch
+    // (params.character.enabled). One avatar per tracked orb, mirroring the orb
+    // field. In character mode the orb sphere is hidden while its entity keeps
+    // easing and feeding position; the avatar stands on the real floor plane
+    // (estFloor), not the orb's floating height.
+    const characters = new CharacterField(
+        app, assets.bitmoji.resource, assets.charIdle.resource, assets.charWalk.resource, params.character);
+    const applyRepresentation = () => {
+        const charMode = params.character.enabled;
+        for (const o of field.orbs) o.setCoreVisible(!charMode);
+        if (charMode) {
+            characters.update(0, field, estFloor); // snap avatars onto the current orbs
+        } else {
+            characters.hideAll();
+        }
+    };
+    applyRepresentation();
+
     // ---------------------------------------------------------- waypoint cam
     const autoCam = new WaypointCamera(camera, controls, orb, { center, halfExtents }, params);
 
@@ -304,6 +329,8 @@ function buildScene() {
         sources,
         captureAnchor,
         onOrbChanged: () => field.applyParams(params.orb),
+        onRepresentationChanged: applyRepresentation,
+        onCharacterChanged: () => characters.applyParams(params.character),
         onCameraChanged: () => {
             controls.moveSpeed = params.camera.moveSpeed;
             controls.moveFastSpeed = params.camera.moveFastSpeed;
@@ -338,6 +365,8 @@ function buildScene() {
         resetToDefaults: () => {
             applyView(resetToDefaults(params));
             hooks.onOrbChanged();
+            hooks.onCharacterChanged();
+            hooks.onRepresentationChanged();
             hooks.onCameraChanged();
             hooks.onSourceModeChanged();
             pane.refresh();
@@ -358,7 +387,7 @@ function buildScene() {
     wireHotkeys({ pane, controls, orb, displayMode, captureAnchor, saveCurrentSession });
 
     // debug handle for console inspection
-    window.__viewer = { app, splat, camera, controls, orb, field, sources, autoCam, minimap, sensorOverlay, displayMode, center, halfExtents, params, get navGrid() { return navGrid; } };
+    window.__viewer = { app, splat, camera, controls, orb, field, characters, sources, autoCam, minimap, sensorOverlay, displayMode, center, halfExtents, params, get navGrid() { return navGrid; } };
 
     // ---------------------------------------------------------- per-frame
     // auto-cutaway engages only when the camera is clearly OUTSIDE the room, so
@@ -371,9 +400,43 @@ function buildScene() {
 
     const round = (v, step) => Math.round(v / step) * step;
 
+    // gsplat black-variant workaround: showing an avatar attaches a skinned mesh
+    // to the World layer (for depth occlusion against the splats), which makes the
+    // gsplat compile a broken shader variant that renders solid black. Recompiling
+    // the gsplat material clears it, but only once the avatar's skinning has
+    // settled — a recompile on the same frame is too early (the bad variant
+    // doesn't exist yet). So when the first avatar becomes visible we recompile
+    // across a frame window (to shorten the flash) plus two wall-clock-delayed
+    // one-shots (the reliable net that lands after settle). The trigger is the
+    // none→some *attached* transition, not the character-mode toggle: in sensor
+    // mode a person may appear long after the mode is on. While every avatar is
+    // hidden they are detached from all layers, so orb-only mode and startup stay
+    // clean and need no kick (and dropping back to zero avatars returns the gsplat
+    // to its known-good no-skin variant, so hiding needs no kick either).
+    const CHAR_KICK_FRAMES = 30;
+    const kickGsplat = () => {
+        const gsMat = /** @type {any} */ (app.scene.gsplat)?.material;
+        if (gsMat) { gsMat.clearVariants?.(); gsMat.update(); }
+    };
+    const scheduleGsplatKicks = () => {
+        gsplatKickFrames = CHAR_KICK_FRAMES;
+        setTimeout(kickGsplat, 600);
+        setTimeout(kickGsplat, 1200);
+    };
+    let gsplatKickFrames = 0;
+    let prevAnyAvatar = false;
+
     app.on('update', (dt) => {
+        if (gsplatKickFrames > 0) {
+            gsplatKickFrames--;
+            kickGsplat();
+        }
         sources.update(dt);
         field.update(dt, params.orb.smoothing);
+        if (params.character.enabled) characters.update(dt, field, estFloor);
+        const anyAvatar = params.character.enabled && characters.anyAttached();
+        if (anyAvatar && !prevAnyAvatar) scheduleGsplatKicks();
+        prevAnyAvatar = anyAvatar;
         helpBar.update();
         if (!displayMode.on) {
             sensorOverlay.update();
@@ -404,17 +467,20 @@ function buildScene() {
         // push shader uniforms (quantized; only re-renders splat when changed).
         // viewPos drives glow-facing only — coarsen it and freeze when unused so
         // camera motion doesn't trigger a gsplat resort every frame.
-        const glowFacingOn = params.orb.glowIntensity > 0 && params.orb.glowFacing > 0;
+        // In character mode the avatar is the visual, so the orb glow is
+        // suppressed entirely (no orbs, zero intensity, no glow-facing).
+        const charMode = params.character.enabled;
+        const glowFacingOn = !charMode && params.orb.glowIntensity > 0 && params.orb.glowFacing > 0;
         const orbStep = params.source.mode === 'click' ? 0.01 : 0.02;
         // one [x,y,z] per active orb, quantized so idle jitter doesn't resort
-        const orbs = field.active().map((o) => {
+        const orbs = charMode ? [] : field.active().map((o) => {
             const p = o.getPosition();
             return [round(p.x, orbStep), round(p.y, orbStep), round(p.z, orbStep)];
         });
         splatFX.setParams({
             orbs,
             orbColor: [params.orb.color.r, params.orb.color.g, params.orb.color.b],
-            orbIntensity: params.orb.glowIntensity,
+            orbIntensity: charMode ? 0 : params.orb.glowIntensity,
             orbRadius: params.orb.glowRadius,
             cutEnabled: cutOn ? 1 : 0,
             cutCamPos: [
@@ -429,7 +495,7 @@ function buildScene() {
             viewPos: glowFacingOn
                 ? [round(camPos.x, 0.05), round(camPos.y, 0.05), round(camPos.z, 0.05)]
                 : [0, 0, 0],
-            glowFacing: params.orb.glowFacing
+            glowFacing: charMode ? 0 : params.orb.glowFacing
         });
     });
 }

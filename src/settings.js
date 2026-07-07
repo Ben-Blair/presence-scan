@@ -9,6 +9,8 @@ import { createPanel } from './panel-controls.js';
  * @property {import('./orb-sources.js').OrbSources} sources - for the status readout
  * @property {(i: number) => void} captureAnchor
  * @property {() => void} onOrbChanged
+ * @property {() => void} onRepresentationChanged
+ * @property {() => void} onCharacterChanged
  * @property {() => void} onCameraChanged
  * @property {() => void} onSourceModeChanged
  * @property {() => void} onNavChanged
@@ -50,6 +52,7 @@ export function createSettingsPanel(params, hooks) {
     const panel = createPanel({ title: 'Garage Viewer', onHide: toggle });
 
     const onOrb = () => hooks.onOrbChanged();
+    const onChar = () => hooks.onCharacterChanged();
     const onCam = () => hooks.onCameraChanged();
     const onNav = () => hooks.onNavChanged();
 
@@ -65,6 +68,14 @@ export function createSettingsPanel(params, hooks) {
     orb.addSlider(params.orb, 'glowFacing', { min: 0, max: 1, step: 0.05, label: 'glow facing', onChange: onOrb });
     orb.addSlider(params.orb, 'height', { min: 0, max: 3, step: 0.05, label: 'height (m)', onChange: onOrb });
     orb.addSlider(params.orb, 'smoothing', { min: 0.5, max: 20, step: 0.5, onChange: onOrb });
+
+    // --- Character (walking-avatar representation) ---
+    const character = panel.addPage({ id: 'character', title: 'Character' });
+    character.addSlider(params.character, 'height', { min: 0.5, max: 3, step: 0.05, label: 'height (m)', onChange: onChar });
+    character.addSlider(params.character, 'heightOffset', { min: -1, max: 1, step: 0.02, label: 'floor offset (m)', onChange: onChar });
+    character.addSlider(params.character, 'walkSpeedScale', { min: 0.2, max: 3, step: 0.05, label: 'walk speed', onChange: onChar });
+    character.addSlider(params.character, 'turnSmoothing', { min: 1, max: 20, step: 0.5, label: 'turn speed', onChange: onChar });
+    character.addSlider(params.character, 'faceOffsetDeg', { min: -180, max: 180, step: 5, label: 'facing offset (°)', onChange: onChar });
 
     // --- Camera (incl. Auto Follow) ---
     const cam = panel.addPage({ id: 'camera', title: 'Camera' });
@@ -189,7 +200,24 @@ export function createSettingsPanel(params, hooks) {
         underHood.sync();
     }
 
-    root.addDrill({ label: 'Orb', page: orb });
+    // Universal orb <-> walking-character switch, applied in every source mode.
+    // Only the selected representation's settings row is shown (Orb when off,
+    // Character when on).
+    let syncRepr = () => {};
+    root.addToggle(params.character, 'enabled', {
+        label: 'Walking character',
+        onChange: () => { hooks.onRepresentationChanged(); syncRepr(); }
+    });
+
+    const orbDrill = root.addDrill({ label: 'Orb', page: orb });
+    const charDrill = root.addDrill({ label: 'Character', page: character });
+    syncRepr = () => {
+        const ch = !!params.character.enabled;
+        orbDrill.setVisible(!ch);
+        charDrill.setVisible(ch);
+    };
+    syncRepr();
+
     root.addDrill({ label: 'Camera', page: cam });
     root.addDrill({ label: 'See inside', page: cut });
     root.addDrill({ label: 'Advanced', page: adv });
@@ -210,7 +238,7 @@ export function createSettingsPanel(params, hooks) {
 
     return {
         element: panel.element,
-        refresh: () => { panel.refresh(); syncModeUI(); },
+        refresh: () => { panel.refresh(); syncModeUI(); syncRepr(); },
         toggle
     };
 }

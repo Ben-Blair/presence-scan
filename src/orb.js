@@ -49,6 +49,15 @@ export class Orb {
         this.target.copy(pos);
     }
 
+    /**
+     * Show/hide only the visible core sphere. Character mode hides it while the
+     * orb entity keeps easing and feeding its position to the glow shader,
+     * minimap and follow camera.
+     */
+    setCoreVisible(v) {
+        this.core.enabled = v;
+    }
+
     applyParams(orbParams) {
         const { r, g, b } = orbParams.color;
         this._color.set(r, g, b);

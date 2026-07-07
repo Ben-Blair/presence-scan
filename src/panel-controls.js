@@ -87,6 +87,8 @@ function makeScope(body, ctx, nav) {
         },
 
         // A disclosure row (label + optional value + chevron) that pushes `page`.
+        // Returns a handle so the caller can show/hide the row live (e.g. reveal
+        // only the Orb or only the Character row depending on the mode).
         addDrill(opts = {}) {
             const { label, page, value } = opts;
             const rowBtn = el('button', 'cp-drill', body);
@@ -99,7 +101,7 @@ function makeScope(body, ctx, nav) {
             }
             el('span', 'cp-drill__chevron', rowBtn).textContent = '›';
             rowBtn.addEventListener('click', () => nav.push(page.id));
-            return scope;
+            return { setVisible: (v) => { rowBtn.style.display = v ? '' : 'none'; } };
         },
 
         addSlider(obj, key, opts = {}) {
