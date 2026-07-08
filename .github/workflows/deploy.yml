@@ -45,6 +45,9 @@ jobs:
       - run: npm run build
         env:
           VITE_KIOSK: 'true'
+          # Pages serves project sites from /<repo-name>/; derive base from the repo
+          # name so renaming the repo can't break asset URLs.
+          VITE_BASE: /${{ github.event.repository.name }}/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
