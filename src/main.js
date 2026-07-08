@@ -569,8 +569,10 @@ function generateDefaultAnchors(center, halfExtents) {
  * reads to suppress the in-scene overlay (CSS handles the DOM chrome).
  */
 function createDisplayToggle() {
-    const startOn = typeof __KIOSK__ !== 'undefined' && __KIOSK__;
-    const state = { on: startOn };
+    // Boot with controls visible everywhere — including the kiosk/Pages build — so
+    // the settings panel is reachable on load. Press V (or the 🖥 button) for the
+    // clean presentation view.
+    const state = { on: false };
     const fab = document.createElement('button');
     fab.className = 'display-fab';
     fab.setAttribute('aria-label', 'Toggle display mode');
