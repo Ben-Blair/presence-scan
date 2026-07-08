@@ -16,7 +16,7 @@
       "smoothing": 8.5
     },
     "character": {
-      "enabled": false,
+      "enabled": true,
       "height": 1.5,
       "heightOffset": 0.0,
       "walkSpeedScale": 1.0,
