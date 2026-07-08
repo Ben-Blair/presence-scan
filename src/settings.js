@@ -49,7 +49,7 @@ export function createSettingsPanel(params, hooks) {
         if (hidden) panel.showRoot(); // reopen clean at the root page
     }
 
-    const panel = createPanel({ title: 'Garage Viewer', onHide: toggle });
+    const panel = createPanel({ title: 'Presence Scan', onHide: toggle });
 
     const onOrb = () => hooks.onOrbChanged();
     const onChar = () => hooks.onCharacterChanged();
@@ -170,7 +170,7 @@ export function createSettingsPanel(params, hooks) {
     adv.addDrill({ label: 'Rendering', page: render });
 
     // ---- root page ---------------------------------------------------------
-    const root = panel.addPage({ id: 'root', title: 'Garage Viewer', root: true });
+    const root = panel.addPage({ id: 'root', title: 'Presence Scan', root: true });
 
     // Primary mode: Demo / Sensor are the two headline modes, plus click-to-place.
     root.addSegmented(params.source, 'mode', {
