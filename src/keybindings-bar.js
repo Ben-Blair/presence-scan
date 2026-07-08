@@ -35,7 +35,10 @@ export function createKeybindingsBar(params) {
             line1.push('<b>WASD</b> move', '<b>L-drag</b> rotate', '<b>R-drag</b> pan', '<b>Scroll</b> zoom');
         }
         if (clickMode) {
-            line1.push('<b>Arrows</b> move orb', '<b>Double-click</b> place orb');
+            // Name whatever the viewer actually sees on the floor — the walking
+            // character when it's enabled, otherwise the glowing orb.
+            const subject = params.character?.enabled ? 'character' : 'orb';
+            line1.push(`<b>Arrows</b> move ${subject}`, `<b>Double-click</b> place ${subject}`);
         }
 
         // Line 2 — global shortcuts (+ anchor capture when it's usable)
@@ -46,7 +49,7 @@ export function createKeybindingsBar(params) {
     };
 
     const update = () => {
-        const sig = `${params.source.mode}|${params.camera.orbitOrb}`;
+        const sig = `${params.source.mode}|${params.camera.orbitOrb}|${params.character?.enabled}`;
         if (sig === lastSig) return;
         lastSig = sig;
         element.innerHTML = build();

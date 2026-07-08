@@ -172,9 +172,10 @@ export function createSettingsPanel(params, hooks) {
     // ---- root page ---------------------------------------------------------
     const root = panel.addPage({ id: 'root', title: 'Presence Scan', root: true });
 
-    // Primary mode: Demo / Sensor are the two headline modes, plus click-to-place.
+    // Primary mode: Demo / Sensor are the two headline modes, plus Manual —
+    // double-click to place and arrow keys to drive it (internal id stays 'click').
     root.addSegmented(params.source, 'mode', {
-        options: { Demo: 'demo', Sensor: 'sensor', Click: 'click' },
+        options: { Demo: 'demo', Sensor: 'sensor', Manual: 'click' },
         onChange: () => { hooks.onSourceModeChanged(); syncModeUI(); }
     });
 
