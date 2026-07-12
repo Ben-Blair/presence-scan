@@ -25,11 +25,11 @@
     },
     "camera": {
       "orbitOrb": true,
-      "fov": 66,
+      "fov": 52,
       "moveSpeed": 2.5,
       "moveFastSpeed": 7,
       "rotateSpeed": 0.25,
-      "renderScale": 1.5,
+      "renderScale": 1,
       "waypoint": {
         "railSmoothing": 0.5,
         "lookSmoothing": 4.0,
