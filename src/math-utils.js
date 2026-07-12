@@ -57,3 +57,23 @@ export function clampToRoomXZ(out, center, halfExtents, margin) {
     out.z = clamp(out.z, b.minZ, b.maxZ);
     return out;
 }
+
+/**
+ * Cap a cutaway wall-peel depth to the room's own half-extent on that axis
+ * (minus a small margin). The cutaway shader hides splats starting `peel`
+ * meters in from the near wall — if `peel` exceeds the room's half-extent,
+ * that zone reaches past the room's center and starts eating into the far
+ * wall too, so "peel the near wall" turns into "hide the whole room" for
+ * that axis. This can't be tuned away once when a scan first ships, because
+ * `halfExtents` comes from `estimateRoomBounds()` and changes with every new
+ * scan (a smaller room shrinks the safe peel depth); reclamping live is what
+ * keeps a stale/oversized peel value from re-breaking on the next swap.
+ *
+ * @param {number} peel - requested peel depth (m)
+ * @param {number} roomHalf - the room's half-extent on this axis (m)
+ * @param {number} [margin=0.1] - keep at least this much of the far side clear
+ * @returns {number} the clamped peel depth
+ */
+export function clampWallPeel(peel, roomHalf, margin = 0.1) {
+    return Math.min(peel, Math.max(0, roomHalf - margin));
+}

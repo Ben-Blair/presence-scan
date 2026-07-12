@@ -236,28 +236,39 @@ export class SplatFX {
     constructor(app, splatEntity) {
         this.app = app;
         this.splatEntity = splatEntity;
+        // The uniforms live on the shared gsplat *template* material, not the
+        // component. That's the object the GPU-sort ("hybrid") renderer's compute
+        // projector reads its render-stage modify uniforms from (it copies
+        // scene.gsplat.material.parameters every dispatch), and it's also what the
+        // WebGL2 quad renderer's render VS pulls in via copyMaterialSettings. Setting
+        // them on the component instead would only reach the copy-to-workbuffer pass,
+        // which the projector bypasses — so on WebGPU the effects would go dead.
+        this.material = app.scene.gsplat.material;
         this._last = null;
     }
 
     /** Install the custom chunk on the unified gsplat template material. */
     apply() {
-        const material = this.app.scene.gsplat.material;
-        material.getShaderChunks('glsl').set('gsplatModifyVS', GLSL);
-        material.getShaderChunks('wgsl').set('gsplatModifyVS', WGSL);
-        material.update();
+        this.material.getShaderChunks('glsl').set('gsplatModifyVS', GLSL);
+        this.material.getShaderChunks('wgsl').set('gsplatModifyVS', WGSL);
+        this.material.update();
     }
 
     /** One-time room bounds for the dollhouse fade (slightly expanded box). */
     setRoomBounds(min, max) {
-        const g = this.splatEntity.gsplat;
-        g.setParameter('uRoomMin', [min.x, min.y, min.z]);
-        g.setParameter('uRoomMax', [max.x, max.y, max.z]);
+        this.material.setParameter('uRoomMin', [min.x, min.y, min.z]);
+        this.material.setParameter('uRoomMax', [max.x, max.y, max.z]);
+        this.material.update();
     }
 
     /**
-     * Push uniforms from a named-field object. Setting parameters on the gsplat
-     * component marks the placement render-dirty (re-copies the workbuffer +
-     * resorts), so this short-circuits when nothing changed.
+     * Push uniforms from a named-field object onto the shared gsplat material. The
+     * render-stage modify runs the glow/cutaway math per splat at draw time (in the
+     * projector on WebGPU, or the render VS on WebGL2), so unlike the old
+     * component-parameter path this does NOT force a workbuffer re-copy/resort when
+     * the orb moves. This short-circuits when nothing changed; on an actual change it
+     * calls material.update() so the WebGL2 quad renderer re-syncs the parameters
+     * (the WebGPU projector reads them live and needs no update).
      *
      * @param {object} p
      * @param {number[][]} p.orbs        - active orb positions [[x,y,z], …] (0..3)
@@ -287,22 +298,25 @@ export class SplatFX {
         if (key === this._last) return false;
         this._last = key;
 
-        const g = this.splatEntity.gsplat;
-        g.setParameter('uOrbCount', count);
-        g.setParameter('uOrbPos0', o0);
-        g.setParameter('uOrbPos1', o1);
-        g.setParameter('uOrbPos2', o2);
-        g.setParameter('uOrbColor', p.orbColor);
-        g.setParameter('uOrbIntensity', p.orbIntensity);
-        g.setParameter('uOrbRadius', p.orbRadius);
-        g.setParameter('uCutEnabled', p.cutEnabled);
-        g.setParameter('uCutCamPos', p.cutCamPos);
-        g.setParameter('uWallPeelPos', p.wallPeelPos);
-        g.setParameter('uWallPeelNeg', p.wallPeelNeg);
-        g.setParameter('uCutSoft', p.cutSoft);
-        g.setParameter('uCutEngage', p.cutEngage);
-        g.setParameter('uViewPos', p.viewPos);
-        g.setParameter('uGlowFacing', p.glowFacing);
+        const m = this.material;
+        m.setParameter('uOrbCount', count);
+        m.setParameter('uOrbPos0', o0);
+        m.setParameter('uOrbPos1', o1);
+        m.setParameter('uOrbPos2', o2);
+        m.setParameter('uOrbColor', p.orbColor);
+        m.setParameter('uOrbIntensity', p.orbIntensity);
+        m.setParameter('uOrbRadius', p.orbRadius);
+        m.setParameter('uCutEnabled', p.cutEnabled);
+        m.setParameter('uCutCamPos', p.cutCamPos);
+        m.setParameter('uWallPeelPos', p.wallPeelPos);
+        m.setParameter('uWallPeelNeg', p.wallPeelNeg);
+        m.setParameter('uCutSoft', p.cutSoft);
+        m.setParameter('uCutEngage', p.cutEngage);
+        m.setParameter('uViewPos', p.viewPos);
+        m.setParameter('uGlowFacing', p.glowFacing);
+        // WebGL2 quad renderer only re-copies material params when the template
+        // material is dirty; the WebGPU projector reads them live regardless.
+        m.update();
         return true;
     }
 }

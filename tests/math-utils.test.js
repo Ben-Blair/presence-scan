@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { smoothFactor, insetBoundsXZ, clampToRoomXZ, clamp } from '../src/math-utils.js';
+import { smoothFactor, insetBoundsXZ, clampToRoomXZ, clamp, clampWallPeel } from '../src/math-utils.js';
 
 describe('smoothFactor', () => {
     it('is 0 when no time has passed', () => {
@@ -57,6 +57,28 @@ describe('clampToRoomXZ', () => {
         const out = { x: 0, y: 7, z: 0 };
         expect(clampToRoomXZ(out, center, he, 0.5)).toBe(out);
         expect(out.y).toBe(7);
+    });
+});
+
+describe('clampWallPeel', () => {
+    it('passes a peel through unchanged when it fits well within the room', () => {
+        expect(clampWallPeel(0.5, 3.06)).toBe(0.5);
+    });
+
+    it('caps a peel that would reach past the room center to the far wall', () => {
+        // regression case: a room shrunk (new scan) to a 1.35m half-extent on Y,
+        // but the ceiling wallPeel default was still tuned to the old, larger
+        // room (4.7m) — without the cap this reaches past the far wall (the
+        // floor) and the whole room fades instead of just the ceiling.
+        expect(clampWallPeel(4.7, 1.3475)).toBeCloseTo(1.2475, 10);
+    });
+
+    it('never returns negative for a room half-extent smaller than the margin', () => {
+        expect(clampWallPeel(1, 0.05)).toBe(0);
+    });
+
+    it('respects a custom margin', () => {
+        expect(clampWallPeel(10, 2, 0.5)).toBe(1.5);
     });
 });
 

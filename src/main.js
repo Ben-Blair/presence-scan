@@ -10,9 +10,9 @@ import {
     Vec3,
     createGraphicsDevice,
     DEVICETYPE_WEBGPU,
+    GSPLAT_RENDERER_RASTER_GPU_SORT,
     EVENT_KEYDOWN,
     FILLMODE_FILL_WINDOW,
-    GSPLAT_RENDERER_RASTER_GPU_SORT,
     KEY_1,
     KEY_2,
     KEY_3,
@@ -35,7 +35,7 @@ import { OrbSources } from './orb-sources.js';
 import { buildNavGridFromColumns, emptyGrid, estimateFloorY } from './nav-grid.js';
 import { estimateRoomBounds } from './room-bounds.js';
 import { NavDebugOverlay } from './nav-debug.js';
-import { insetBoundsXZ, CUTAWAY_ENGAGE_MARGIN } from './math-utils.js';
+import { insetBoundsXZ, CUTAWAY_ENGAGE_MARGIN, clampWallPeel } from './math-utils.js';
 import { WaypointCamera } from './waypoint-camera.js';
 import { SensorMinimap } from './sensor-minimap.js';
 import { SensorOverlay } from './sensor-overlay.js';
@@ -47,13 +47,18 @@ const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('app-ca
 const loadingEl = /** @type {HTMLElement} */ (document.getElementById('loading'));
 const progressEl = /** @type {HTMLElement} */ (document.getElementById('loading-progress'));
 
-// Prefer WebGPU: the unified gsplat renderer's CPU-side sort + raster path (the
-// only path available on WebGL2) becomes the bottleneck at this splat count —
-// millions of splats re-sorted on the CPU every time the camera moves. WebGPU
-// unlocks the engine's GPU-sort/compute renderer paths instead. createGraphicsDevice
-// falls back to WebGL2 automatically if the browser/device doesn't support WebGPU
-// (DEVICETYPE_WEBGL2 is appended internally when omitted from deviceTypes), and the
-// custom gsplat shader chunk already ships both GLSL and WGSL (splat-effects.js).
+// Prefer WebGPU so the unified gsplat renderer can use GPU-side sorting instead of
+// the CPU-side sort of all ~4M splats on every camera move (the only path WebGL2
+// offers, and the framerate/heat bottleneck at this splat count). createGraphicsDevice
+// appends WebGL2 as an automatic fallback when the browser lacks WebGPU.
+//
+// Making the effects survive the GPU-sort path required engine 2.20.6 (see
+// splat-effects.js and the memory note): 2.19.7's GPU-sort "projector" compute
+// pass didn't run our custom gsplatModifyVS chunk at all, so orb glow + cutaway
+// silently died. 2.20.6 runs the render-stage modifySplatColor once per splat in
+// the projector (GPU-sort path) exactly as the quad VS does on WebGL2 — as long as
+// the uniforms live on app.scene.gsplat.material, which is where the projector
+// reads them (see SplatFX). The custom chunk already ships GLSL + WGSL.
 const graphicsDevice = await createGraphicsDevice(canvas, {
     deviceTypes: [DEVICETYPE_WEBGPU],
     antialias: false
@@ -70,14 +75,12 @@ app.setCanvasResolution(RESOLUTION_AUTO);
 app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio, params.camera.renderScale);
 window.addEventListener('resize', () => app.resizeCanvas());
 
-// GPU-side splat sort instead of the CPU-sort fallback (WebGPU only — silently
-// stays on CPU-sort on WebGL2, verified via GSplatParams' own device.isWebGPU
-// check). Tried the full GSPLAT_RENDERER_COMPUTE pipeline first: it broke the
-// walking-character depth-occlusion trick (avatar stopped rendering entirely,
-// even while attached/positioned correctly) — this hybrid mode (still
-// raster/quad rendering, just GPU-sorted) doesn't touch that path and verified
-// clean visually (character occlusion, camera movement, cutaway, no console
-// errors). Both modes are marked experimental/alpha upstream.
+// GPU-side splat sort ("hybrid" renderer). WebGPU-only; on the WebGL2 fallback the
+// engine silently stays on the CPU-sort quad renderer (its own device.isWebGPU
+// gate). The full GSPLAT_RENDERER_COMPUTE pipeline is NOT used: it broke the
+// walking-character depth-occlusion trick (avatar stopped rendering entirely) — the
+// hybrid mode keeps raster/quad fragment rendering, just GPU-sorted, and leaves
+// that path intact.
 app.scene.gsplat.renderer = GSPLAT_RENDERER_RASTER_GPU_SORT;
 
 app.scene.ambientLight = new Color(0.3, 0.3, 0.3);
@@ -548,8 +551,21 @@ function buildScene() {
                 cutOn ? round(camPos.y, 0.03) : 0,
                 cutOn ? round(camPos.z, 0.03) : 0
             ],
-            wallPeelPos: [params.cutaway.wallPeels.xPos, params.cutaway.wallPeels.yPos, params.cutaway.wallPeels.zPos],
-            wallPeelNeg: [params.cutaway.wallPeels.xNeg, params.cutaway.wallPeels.yNeg, params.cutaway.wallPeels.zNeg],
+            // capped to the room's own half-extent per axis: a peel deeper than
+            // that reaches past the room center and starts fading the far wall
+            // too (see clampWallPeel) — matters because halfExtents comes from
+            // estimateRoomBounds() and can shrink on a scan swap, leaving a
+            // previously-fine wallPeel value oversized for the new room.
+            wallPeelPos: [
+                clampWallPeel(params.cutaway.wallPeels.xPos, halfExtents.x),
+                clampWallPeel(params.cutaway.wallPeels.yPos, halfExtents.y),
+                clampWallPeel(params.cutaway.wallPeels.zPos, halfExtents.z)
+            ],
+            wallPeelNeg: [
+                clampWallPeel(params.cutaway.wallPeels.xNeg, halfExtents.x),
+                clampWallPeel(params.cutaway.wallPeels.yNeg, halfExtents.y),
+                clampWallPeel(params.cutaway.wallPeels.zNeg, halfExtents.z)
+            ],
             cutSoft: params.cutaway.softness,
             cutEngage: params.cutaway.engage,
             viewPos: glowFacingOn
