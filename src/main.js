@@ -8,8 +8,11 @@ import {
     Mouse,
     TouchDevice,
     Vec3,
+    createGraphicsDevice,
+    DEVICETYPE_WEBGPU,
     EVENT_KEYDOWN,
     FILLMODE_FILL_WINDOW,
+    GSPLAT_RENDERER_RASTER_GPU_SORT,
     KEY_1,
     KEY_2,
     KEY_3,
@@ -44,16 +47,38 @@ const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('app-ca
 const loadingEl = /** @type {HTMLElement} */ (document.getElementById('loading'));
 const progressEl = /** @type {HTMLElement} */ (document.getElementById('loading-progress'));
 
+// Prefer WebGPU: the unified gsplat renderer's CPU-side sort + raster path (the
+// only path available on WebGL2) becomes the bottleneck at this splat count —
+// millions of splats re-sorted on the CPU every time the camera moves. WebGPU
+// unlocks the engine's GPU-sort/compute renderer paths instead. createGraphicsDevice
+// falls back to WebGL2 automatically if the browser/device doesn't support WebGPU
+// (DEVICETYPE_WEBGL2 is appended internally when omitted from deviceTypes), and the
+// custom gsplat shader chunk already ships both GLSL and WGSL (splat-effects.js).
+const graphicsDevice = await createGraphicsDevice(canvas, {
+    deviceTypes: [DEVICETYPE_WEBGPU],
+    antialias: false
+});
+
 const app = new Application(canvas, {
     mouse: new Mouse(canvas),
     keyboard: new Keyboard(window),
     touch: new TouchDevice(canvas),
-    graphicsDeviceOptions: { antialias: false }
+    graphicsDevice
 });
 app.setCanvasFillMode(FILLMODE_FILL_WINDOW);
 app.setCanvasResolution(RESOLUTION_AUTO);
 app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio, params.camera.renderScale);
 window.addEventListener('resize', () => app.resizeCanvas());
+
+// GPU-side splat sort instead of the CPU-sort fallback (WebGPU only — silently
+// stays on CPU-sort on WebGL2, verified via GSplatParams' own device.isWebGPU
+// check). Tried the full GSPLAT_RENDERER_COMPUTE pipeline first: it broke the
+// walking-character depth-occlusion trick (avatar stopped rendering entirely,
+// even while attached/positioned correctly) — this hybrid mode (still
+// raster/quad rendering, just GPU-sorted) doesn't touch that path and verified
+// clean visually (character occlusion, camera movement, cutaway, no console
+// errors). Both modes are marked experimental/alpha upstream.
+app.scene.gsplat.renderer = GSPLAT_RENDERER_RASTER_GPU_SORT;
 
 app.scene.ambientLight = new Color(0.3, 0.3, 0.3);
 
