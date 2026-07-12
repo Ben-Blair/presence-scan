@@ -130,6 +130,7 @@ export function createSettingsPanel(params, hooks) {
     demo.addSlider(params.source.demo, 'gridCell', { min: 0.1, max: 0.5, step: 0.05, label: 'grid cell (m)', onChange: onNav });
     demo.addSlider(params.source.demo, 'clearance', { min: 0, max: 0.6, step: 0.05, label: 'obstacle clearance (m)', onChange: onNav });
     demo.addSlider(params.source.demo, 'floorOffset', { min: -0.5, max: 0.5, step: 0.01, label: 'floor offset (m)', onChange: onNav });
+    demo.addSlider(params.source.demo, 'reachHeight', { min: 0.1, max: 1.5, step: 0.05, label: 'obstacle height (m)', onChange: onNav });
     demo.addSlider(params.source.demo, 'groundGap', { min: 0, max: 0.6, step: 0.05, label: 'grounded within (m)', onChange: onNav });
     demo.addSlider(params.source.demo, 'gapBridge', { min: 0, max: 0.6, step: 0.05, label: 'seal wall gaps (m)', onChange: onNav });
     demo.addSlider(params.source.demo, 'minPerBin', { min: 1, max: 20, step: 1, label: 'min splats per bin', onChange: onNav });

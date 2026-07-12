@@ -38,28 +38,7 @@
         "deadzoneFrac": 0.6,
         "minOrbDistance": 2.1
       },
-      "anchors": [
-        {
-          "name": "NW",
-          "box": { "minX": -4.443, "minZ": -4.112, "maxX": 0.411, "maxZ": 0.011 },
-          "eye": { "x": 1.569, "y": 1.534, "z": 2.769 }
-        },
-        {
-          "name": "NE",
-          "box": { "minX": 0.411, "minZ": -4.112, "maxX": 5.266, "maxZ": 0.011 },
-          "eye": { "x": -2.244, "y": 1.923, "z": -2.260 }
-        },
-        {
-          "name": "SW",
-          "box": { "minX": -4.443, "minZ": 0.011, "maxX": 0.411, "maxZ": 4.134 },
-          "eye": { "x": -2.067, "y": 1.320, "z": 2.002 }
-        },
-        {
-          "name": "SE",
-          "box": { "minX": 0.411, "minZ": 0.011, "maxX": 5.266, "maxZ": 4.134 },
-          "eye": { "x": 1.384, "y": 1.566, "z": -2.282 }
-        }
-      ]
+      "anchors": []
     },
     "cutaway": {
       "mode": "auto",
@@ -88,6 +67,7 @@
         "clearance": 0,
         "avoidRadius": 0.6,
         "floorOffset": 0,
+        "reachHeight": 0.35,
         "minPerBin": 2,
         "groundGap": 0.25,
         "gapBridge": 0.3,

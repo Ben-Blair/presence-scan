@@ -24,12 +24,13 @@ import {
 import { CameraControls } from './camera-controls.js';
 
 import { params } from './params.js';
-import { applyParams, resolveStartup, resetToDefaults, saveSession } from './settings-store.js';
+import { applyParams, resolveStartup, resetToDefaults, saveSession, roomBoundsChanged } from './settings-store.js';
 import { OrbField } from './orb-field.js';
 import { CharacterField } from './character.js';
 import { SplatFX } from './splat-effects.js';
 import { OrbSources } from './orb-sources.js';
 import { buildNavGridFromColumns, emptyGrid, estimateFloorY } from './nav-grid.js';
+import { estimateRoomBounds } from './room-bounds.js';
 import { NavDebugOverlay } from './nav-debug.js';
 import { insetBoundsXZ, CUTAWAY_ENGAGE_MARGIN } from './math-utils.js';
 import { WaypointCamera } from './waypoint-camera.js';
@@ -61,7 +62,6 @@ canvas.addEventListener('contextmenu', e => e.preventDefault());
 
 const assets = {
     garage: new Asset('garage', 'gsplat', { url: 'assets/garage.sog' }),
-    collision: new Asset('collision', 'container', { url: 'assets/garagecollisionmesh.glb' }),
     // walking-character representation (optional; toggled in settings). The
     // bitmoji mesh + separate idle/walk clips retarget onto it by joint name.
     bitmoji: new Asset('bitmoji', 'container', { url: 'assets/character/bitmoji.glb' }),
@@ -114,53 +114,76 @@ function buildScene() {
     app.root.addChild(splat);
 
     // ---------------------------------------------------------- room bounds
-    // the collision mesh gives the true room bounds (the raw splat AABB is
-    // bloated by floater outliers); it's only used for measurement, never
-    // rendered.
-    const collisionMesh = /** @type {any} */ (assets.collision.resource).instantiateRenderEntity();
-    app.root.addChild(collisionMesh);
-    let worldAabb = deriveRoomBounds(collisionMesh);
-    if (!worldAabb) {
-        worldAabb = new BoundingBox();
-        worldAabb.setFromTransformedAabb(
-            /** @type {any} */ (assets.garage.resource).aabb, splat.getWorldTransform());
-    }
-    const center = worldAabb.center.clone();
-    const halfExtents = worldAabb.halfExtents.clone();
-    params.source.floorY = worldAabb.getMin().y + 0.05;
+    // the engine's own splat-asset AABB (resource.aabb) is a raw min/max over
+    // every splat, so a handful of far-flung floater points can bloat it to
+    // many times the room's real size (the old collision mesh — tied to a
+    // previous scan and no longer available — used to save us from this).
+    // estimateRoomBounds derives X/Z (and a first-pass Y) from the splat
+    // centers' per-axis density instead, rejecting sparse outlier bins
+    // regardless of how far out they sit; only fall back to the raw AABB when
+    // the splat kept no CPU centers to histogram.
+    const gsRes = /** @type {any} */ (assets.garage.resource);
+    const useSplatNav = !!(gsRes && gsRes.hasCenters);
+    const splatMatrix = splat.getWorldTransform().data;
+    const rawAabb = new BoundingBox();
+    rawAabb.setFromTransformedAabb(gsRes.aabb, splat.getWorldTransform());
+    const robustBounds = (useSplatNav && estimateRoomBounds(gsRes.centers, splatMatrix)) ||
+        { min: rawAabb.getMin().clone(), max: rawAabb.getMax().clone() };
+    const center = new Vec3(
+        (robustBounds.min.x + robustBounds.max.x) / 2,
+        (robustBounds.min.y + robustBounds.max.y) / 2,
+        (robustBounds.min.z + robustBounds.max.z) / 2);
+    const halfExtents = new Vec3(
+        (robustBounds.max.x - robustBounds.min.x) / 2,
+        (robustBounds.max.y - robustBounds.min.y) / 2,
+        (robustBounds.max.z - robustBounds.min.z) / 2);
+
+    // ---------------------------------------------------------- floor height
+    // params.source.floorY is the single shared floor reference every subsystem
+    // reads (orb spawn/click/sensor/demo-wander placement, the character avatar's
+    // ground plane, the nav grid anchor). Prefer the density-based estimate from
+    // the splat centers' y-histogram (estimateFloorY) over the room bounds' own
+    // min-y above — it specifically rejects the driveway sloping away outside
+    // the door, which the generic per-axis trim isn't tuned for. Only fall back
+    // to the room-bounds min-y when the splat kept no CPU centers to histogram.
+    const navBounds = insetBoundsXZ(center, halfExtents, 0.15);
+    const estFloor = useSplatNav
+        ? (estimateFloorY(gsRes.centers, splatMatrix, navBounds) ?? robustBounds.min.y)
+        : robustBounds.min.y;
+    params.source.floorY = estFloor;
+
+    // refine the room's Y extent now that the dedicated floor estimate is
+    // known, so anchors/cutaway/the auto-engage box all agree with the same
+    // floor everything else uses (the ceiling side keeps the density trim above).
+    center.y = (estFloor + robustBounds.max.y) / 2;
+    halfExtents.y = (robustBounds.max.y - estFloor) / 2;
 
     // ---------------------------------------------------------- nav grid
     // demo-mode occupancy grid, derived entirely from the gaussian splat centers
-    // (no collision mesh) so obstacles match the visible scan by construction. A
-    // cell is blocked when its column holds a *grounded* solid reaching the orb's
-    // travel height (buildNavGridFromColumns): thin floor speckle and wall-hung
-    // clutter floating above the floor are rejected, so the footprint hugs the
-    // real object. The vertical extent is anchored to the real floor plane
-    // estimated from the splats' y-density (params.source.floorY sits ~0.55m
-    // lower — the room AABB min includes the driveway sloping away outside the
-    // door). Sparse wall coverage can leave holes; buildNavGridFromColumns closes
-    // small gaps (gapBridge) so the walkable flood-fill can't leak past the walls.
-    const gsRes = /** @type {any} */ (assets.garage.resource);
-    const useSplatNav = !!(gsRes && gsRes.hasCenters);
-    collisionMesh.destroy(); // measured for room bounds only; never feeds the nav grid
-    const splatMatrix = splat.getWorldTransform().data;
-    const navBounds = insetBoundsXZ(center, halfExtents, 0.15);
-    const estFloor = useSplatNav
-        ? (estimateFloorY(gsRes.centers, splatMatrix, navBounds) ?? params.source.floorY)
-        : params.source.floorY;
+    // so obstacles match the visible scan by construction. A
+    // cell is blocked when its column holds a *grounded* solid reaching
+    // `reachHeight` above the floor (buildNavGridFromColumns): thin floor speckle
+    // and wall-hung clutter floating above the floor are rejected, so the
+    // footprint hugs the real object. `reachHeight` is a directly-tuned obstacle
+    // height (knee/hip-ish, not the orb's cosmetic floating height — an object
+    // only needs to block a *person's* path, not physically reach the floating
+    // orb visual) — do not derive it from `params.orb.height`/`params.source.floorY`
+    // again: it used to be computed as `(floorY+orb.height)-floor`, which only
+    // produced a sane ~0.35m by accident, riding on floorY's old ~0.55m offset
+    // from the real floor; now that floorY == the real floor, that formula would
+    // give ~0.9m and silently stop counting most real clutter as obstacles.
+    // Sparse wall coverage can leave holes; buildNavGridFromColumns closes small
+    // gaps (gapBridge) so the walkable flood-fill can't leak past the walls.
     const V_BIN = 0.1; // vertical bin height (m) for the column occupancy profile
     const navGridOpts = () => {
         const d = params.source.demo;
         const floor = estFloor + d.floorOffset;
-        // the orb rides at floorY + orb.height; block columns that reach it
-        const reachHeight = Math.max(V_BIN,
-            (params.source.floorY + params.orb.height) - floor);
         return {
             ...navBounds,
             cell: d.gridCell,
             floorY: floor,
             vBin: V_BIN,
-            reachHeight,
+            reachHeight: Math.max(V_BIN, d.reachHeight),
             groundGap: d.groundGap,
             gapBridge: d.gapBridge,
             inflate: d.clearance,
@@ -183,8 +206,15 @@ function buildScene() {
 
     // ---------------------------------------------------------- anchors
     // Auto-derive default zones from the runtime room bounds when none are
-    // configured. Captured/edited anchors (persisted via the settings store in
-    // params.camera.anchors) override these.
+    // configured, or when the loaded scan's bounds don't match whatever the
+    // saved anchors/view were captured against — swapping in a new scan makes
+    // old anchors point at the wrong place, so discard them along with the
+    // saved camera view. A plain reload of the *same* scan keeps them (bounds
+    // match within tolerance), same as today.
+    const staleSession = roomBoundsChanged(startup.roomBounds, { center, halfExtents });
+    if (staleSession) {
+        params.camera.anchors = [];
+    }
     if (params.camera.anchors.length === 0) {
         params.camera.anchors.push(...generateDefaultAnchors(center, halfExtents));
     }
@@ -199,7 +229,12 @@ function buildScene() {
     });
     app.root.addChild(camera);
 
-    const view = startup.view;
+    // a stale session's saved view is meaningless against the new scan's
+    // coordinates — fall back to a runtime pose derived from the (freshly
+    // regenerated) first anchor instead of trusting old numbers.
+    const view = staleSession
+        ? { position: params.camera.anchors[0].eye, focus: { x: center.x, y: center.y, z: center.z } }
+        : startup.view;
     const fallbackOrb = new Vec3(center.x, params.source.floorY + params.orb.height, center.z);
     const spawnEye = new Vec3(view.position.x, view.position.y, view.position.z);
     const spawnFocus = new Vec3(view.focus.x, view.focus.y, view.focus.z);
@@ -234,12 +269,12 @@ function buildScene() {
     splatFX.apply();
     // the cutaway peel anchors to the near wall, so it needs the true wall line
     // (a tiny margin keeps the wall surface splats themselves on the solid side)
+    // — reuse the same robust center/halfExtents everything else agrees on,
+    // rather than the raw (floater-bloated) splat AABB.
     {
         const margin = 0.05;
-        const min = worldAabb.getMin().clone();
-        const max = worldAabb.getMax().clone();
-        min.x -= margin; min.y -= margin; min.z -= margin;
-        max.x += margin; max.y += margin; max.z += margin;
+        const min = new Vec3(center.x - halfExtents.x - margin, center.y - halfExtents.y - margin, center.z - halfExtents.z - margin);
+        const max = new Vec3(center.x + halfExtents.x + margin, center.y + halfExtents.y + margin, center.z + halfExtents.z + margin);
         splatFX.setRoomBounds(min, max);
     }
 
@@ -284,7 +319,7 @@ function buildScene() {
             position: camera.getPosition(),
             focus: controls.focusPoint.clone(),
             orb: orb.getPosition()
-        }, params);
+        }, params, { center, halfExtents });
         console.info('Saved settings for next load (view + controls). Reload to apply.');
     };
 
@@ -498,27 +533,6 @@ function buildScene() {
             glowFacing: charMode ? 0 : params.orb.glowFacing
         });
     });
-}
-
-/**
- * Measure the true room bounds from the collision mesh's render instances.
- * Returns the world-space AABB, or null if the mesh has no renderables (the
- * caller then falls back to the splat AABB).
- */
-function deriveRoomBounds(collisionMesh) {
-    const worldAabb = new BoundingBox();
-    let aabbInit = false;
-    collisionMesh.findComponents('render').forEach((render) => {
-        render.meshInstances.forEach((mi) => {
-            if (!aabbInit) {
-                worldAabb.copy(mi.aabb);
-                aabbInit = true;
-            } else {
-                worldAabb.add(mi.aabb);
-            }
-        });
-    });
-    return aabbInit ? worldAabb : null;
 }
 
 /**

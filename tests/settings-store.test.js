@@ -3,6 +3,7 @@ import {
     applyParams,
     resolveStartup,
     saveSession,
+    roomBoundsChanged,
     defaultView,
     defaultParams
 } from '../src/settings-store.js';
@@ -72,5 +73,40 @@ describe('resolveStartup', () => {
         expect(params.source.mode).toBe('demo');
         expect(params.source.demoSpeed).toBe(0.5);
         expect(params.source.demo).toEqual(defaultParams.source.demo);
+    });
+
+    it('round-trips the room-bounds fingerprint through saveSession', () => {
+        const view = { position: { x: 1, y: 2, z: 3 }, focus: { x: 4, y: 5, z: 6 } };
+        const roomBounds = { center: { x: 1, y: 2, z: 3 }, halfExtents: { x: 4, y: 5, z: 6 } };
+        saveSession(view, defaultParams, roomBounds);
+        expect(resolveStartup().roomBounds).toEqual(roomBounds);
+    });
+
+    it('has no room-bounds fingerprint for a session saved without one', () => {
+        const view = { position: { x: 1, y: 2, z: 3 }, focus: { x: 4, y: 5, z: 6 } };
+        saveSession(view, defaultParams);
+        expect(resolveStartup().roomBounds).toBeUndefined();
+    });
+});
+
+describe('roomBoundsChanged', () => {
+    const bounds = { center: { x: 0, y: 1, z: 0 }, halfExtents: { x: 2, y: 1, z: 2 } };
+
+    it('is true when there is no saved fingerprint (fresh install, or pre-fingerprint session)', () => {
+        expect(roomBoundsChanged(undefined, bounds)).toBe(true);
+    });
+
+    it('is false for an identical fingerprint', () => {
+        expect(roomBoundsChanged(bounds, bounds)).toBe(false);
+    });
+
+    it('is false within tolerance (re-scan noise)', () => {
+        const nearlySame = { center: { x: 0.1, y: 1, z: 0 }, halfExtents: { x: 2, y: 1, z: 2.1 } };
+        expect(roomBoundsChanged(bounds, nearlySame, 0.25)).toBe(false);
+    });
+
+    it('is true when a different room/layout was scanned', () => {
+        const different = { center: { x: 5, y: 1, z: 0 }, halfExtents: { x: 2, y: 1, z: 2 } };
+        expect(roomBoundsChanged(bounds, different)).toBe(true);
     });
 });
