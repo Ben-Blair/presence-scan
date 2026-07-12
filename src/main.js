@@ -317,6 +317,20 @@ function buildScene() {
     // (estFloor), not the orb's floating height.
     const characters = new CharacterField(
         app, assets.bitmoji.resource, assets.charIdle.resource, assets.charWalk.resource, params.character);
+
+    // renderScale caps the whole canvas's device-pixel-ratio, so it normally
+    // softens everything drawn to it — including the character mesh, which
+    // shares the same camera/framebuffer as the splat (required for the
+    // depth-occlusion trick between them). Rather than let a low renderScale
+    // (chosen to keep the ~4M-splat render cheap) blur a visible avatar, force
+    // full native resolution whenever an avatar is actually on screen; drop
+    // back to the slider's cap the moment none are (orb-only mode, startup).
+    let charFullRes = false;
+    const applyRenderScale = () => {
+        const cap = charFullRes ? window.devicePixelRatio : params.camera.renderScale;
+        app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio, cap);
+        app.resizeCanvas();
+    };
     const applyRepresentation = () => {
         const charMode = params.character.enabled;
         for (const o of field.orbs) o.setCoreVisible(!charMode);
@@ -399,8 +413,7 @@ function buildScene() {
             controls.moveFastSpeed = params.camera.moveFastSpeed;
             controls.rotateSpeed = params.camera.rotateSpeed;
             /** @type {any} */ (camera.camera).fov = params.camera.fov;
-            app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio, params.camera.renderScale);
-            app.resizeCanvas();
+            applyRenderScale();
         },
         onNavChanged: () => {
             navGrid = buildGrid();
@@ -499,6 +512,10 @@ function buildScene() {
         if (params.character.enabled) characters.update(dt, field, estFloor);
         const anyAvatar = params.character.enabled && characters.anyAttached();
         if (anyAvatar && !prevAnyAvatar) scheduleGsplatKicks();
+        if (anyAvatar !== charFullRes) {
+            charFullRes = anyAvatar;
+            applyRenderScale();
+        }
         prevAnyAvatar = anyAvatar;
         helpBar.update();
         if (!displayMode.on) {
