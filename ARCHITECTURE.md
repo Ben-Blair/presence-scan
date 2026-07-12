@@ -66,10 +66,12 @@ the shared `params` object every frame, so changes take effect immediately.
 - **The splat shader runs in world space.** In PlayCanvas unified gsplat mode, the `gsplatModifyVS`
   chunk executes in the copy-to-workbuffer pass, where splat centers are already world-space — so
   orb/camera positions are passed as plain world coordinates, no extra transforms.
-- **Room bounds come from the collision mesh, not the splat.** The raw 3DGS data is bloated by
-  floater outliers, so its AABB is wrong. Instead `garagecollisionmesh.glb` is loaded, measured,
-  and immediately `destroy()`ed — it is never rendered. (The splat itself is rendered with a
-  180° X flip because raw 3DGS data is y-down.)
+- **Room bounds come from splat density, not the raw asset AABB.** The splat's own
+  precomputed `resource.aabb` can be bloated many times past the room's real size by a
+  handful of far-flung floater points, so `estimateRoomBounds()` (`src/room-bounds.js`)
+  histograms the splat centers per axis instead and keeps only the extent that clears a
+  density threshold, rejecting those outliers without needing a separate mesh asset. (The
+  splat itself is rendered with a 180° X flip because raw 3DGS data is y-down.)
 - **Setting a gsplat uniform is expensive** — it marks the placement render-dirty and forces a
   workbuffer re-copy and resort. So `SplatFX.setParams()` short-circuits when nothing changed, and
   `main.js` **quantizes positions** (`round(v, 0.01)`) before passing them so sub-centimetre jitter

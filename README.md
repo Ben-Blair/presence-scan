@@ -87,8 +87,6 @@ Fly the camera overhead to read the floor plan: sensor dot at the wedge apex, co
 - **Camera** — speeds, orbit-the-orb toggle.
 - **Cutaway** — auto/on/off, keep distance, fade softness. In auto mode, walls between
   you and the orb fade out whenever the camera leaves the room.
-- **Occlusion** — optional depth-only render of the collision mesh for crisp orb
-  occlusion behind walls.
 - **Orb Position Source** — click-to-place, demo path, or HLK mmWave over WebSocket
   (JSON `{"targets":[{"x":<mm>,"y":<mm>}, …]}` — up to three people, one orb each —
   with origin/rotation/scale calibration).
@@ -97,4 +95,3 @@ Fly the camera overhead to read the floor plan: sensor dot at the wedge apex, co
 
 - `public/assets/garage.sog` — compressed from `garage30000.ply` (944 MB -> 54 MB) via
   `npx @playcanvas/splat-transform garage30000.ply -H 1 garage.sog`
-- `public/assets/garagecollisionmesh.glb` — collision/occlusion mesh
