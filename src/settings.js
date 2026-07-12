@@ -46,7 +46,16 @@ export function createSettingsPanel(params, hooks) {
         hidden = !hidden;
         panel.element.classList.toggle('cp--hidden', hidden);
         fab.classList.toggle('cp-fab--show', hidden);
-        if (hidden) panel.showRoot(); // reopen clean at the root page
+        if (hidden) {
+            panel.showRoot(); // reopen clean at the root page
+        } else {
+            // The page-stack sizes itself off scrollHeight/getBoundingClientRect, which
+            // read as 0 while `.cp` sits behind `display: none`. Any resize fired during
+            // that window (e.g. toggling display mode, see createDisplayToggle) bakes in
+            // a 0px height that a plain class removal here doesn't fix. Re-measure now
+            // that the panel is actually visible — same trick buildSection() uses.
+            window.dispatchEvent(new Event('resize'));
+        }
     }
 
     const panel = createPanel({ title: 'Presence Scan', onHide: toggle });
