@@ -63,7 +63,7 @@
       "floorY": -0.5484,
       "demo": {
         "orbCount": 1,
-        "gridCell": 0.2,
+        "gridCell": 0.1,
         "clearance": 0,
         "avoidRadius": 0.6,
         "floorOffset": 0,
