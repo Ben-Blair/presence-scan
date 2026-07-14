@@ -9,12 +9,25 @@ import { smoothFactor } from './math-utils.js';
 
 const MAX_CHARACTERS = 3; // mirrors OrbField's MAX_ORBS (LD2450 tracks three)
 
-// speed (m/s) below which the avatar is considered stopped -> plays idle
-const MOVE_THRESHOLD = 0.06;
+// speed (m/s), after velocity smoothing, that must be exceeded to transition
+// idle -> moving. Paired with MOVE_EXIT_THRESHOLD (hysteresis) so a speed
+// hovering near the boundary (residual sensor jitter) can't flicker the
+// moving state every frame.
+const MOVE_ENTER_THRESHOLD = 0.08;
+// speed (m/s) below which a moving avatar falls back to idle.
+const MOVE_EXIT_THRESHOLD = 0.04;
 // world speed at which the walk clip plays at its authored cadence (rate 1).
 // Above this the playback rate scales up so the feet don't skate; below it,
 // it slows down. Roughly a natural human walk.
 const NOMINAL_WALK = 1.2;
+// smoothing rate for the heading velocity vector (dx/dt, dz/dt), via the same
+// smoothFactor() idiom as turnSmoothing/orb.smoothing below. Deliberately
+// more damped than either: velocity is ideally exactly zero at rest, so any
+// smoothed-nonzero reading there is pure noise, and its *direction*
+// (atan2) needs to be untrustworthy-until-proven-real before it can drive
+// the avatar's facing -- damping the resulting yaw angle isn't enough,
+// because by then a noisy target heading has already been chosen.
+const VEL_SMOOTHING = 6.0;
 
 /**
  * Pull the {@link AnimTrack} out of a loaded glb container's animation list.
@@ -112,6 +125,9 @@ export class Character {
 
         this._yaw = 0;          // current facing (deg, about Y)
         this._prev = new Vec3(); // previous frame position (for speed/heading)
+        this._velX = 0;          // EMA'd heading-velocity, x (m/s) -- see VEL_SMOOTHING
+        this._velZ = 0;          // EMA'd heading-velocity, z (m/s)
+        this._moving = false;    // hysteretic moving/idle state
         this._needsSnap = true;  // teleport (don't streak) on first update after enabling
 
         this.entity.enabled = false;
@@ -168,6 +184,9 @@ export class Character {
     teleport(pos, floorY) {
         this.entity.setPosition(pos.x, floorY + this._heightOffset, pos.z);
         this._prev.set(pos.x, floorY + this._heightOffset, pos.z);
+        this._velX = 0;
+        this._velZ = 0;
+        this._moving = false;
         this._anim.setBoolean('moving', false);
         this._anim.speed = 1;
         this._needsSnap = false;
@@ -186,25 +205,56 @@ export class Character {
         const y = floorY + this._heightOffset;
         const dx = pos.x - this._prev.x;
         const dz = pos.z - this._prev.z;
-        const speed = dt > 0 ? Math.hypot(dx, dz) / dt : 0;
+        const rawVelX = dt > 0 ? dx / dt : 0;
+        const rawVelZ = dt > 0 ? dz / dt : 0;
 
-        this.entity.setPosition(pos.x, y, pos.z);
         this._prev.set(pos.x, y, pos.z);
 
-        const moving = speed > MOVE_THRESHOLD;
-        this._anim.setBoolean('moving', moving);
-        this._anim.speed = moving
+        // Smooth the *velocity vector* (not just the yaw angle derived from
+        // it) so a single noisy frame's direction is never trusted on its
+        // own -- a near-zero, direction-random delta gets averaged against
+        // recent history before it can influence either the moving gate or
+        // the facing angle. This is on top of, not instead of, the
+        // turnSmoothing yaw ease below: that damps how fast the avatar
+        // *turns* once a target heading is picked; this damps how the
+        // target heading gets picked in the first place.
+        const velT = smoothFactor(VEL_SMOOTHING, dt);
+        this._velX += (rawVelX - this._velX) * velT;
+        this._velZ += (rawVelZ - this._velZ) * velT;
+        const speed = Math.hypot(this._velX, this._velZ);
+
+        // Hysteresis on the moving/idle gate: a speed hovering near the
+        // threshold (residual jitter) can't flicker in/out of "moving"
+        // every frame -- it must clear the higher bar to start moving, and
+        // fall under the lower bar to be considered stopped again.
+        this._moving = this._moving
+            ? speed > MOVE_EXIT_THRESHOLD
+            : speed > MOVE_ENTER_THRESHOLD;
+
+        this._anim.setBoolean('moving', this._moving);
+        this._anim.speed = this._moving
             ? Math.max(0.4, Math.min(2.5, (speed / NOMINAL_WALK) * this._walkSpeedScale))
             : 1;
 
-        // face the direction of travel (only while actually moving, so a stop
-        // doesn't snap the heading to an arbitrary angle)
-        if (moving) {
-            const targetYaw = Math.atan2(dx, dz) * (180 / Math.PI) + this._faceOffsetDeg;
+        // Only actually translate the mesh while considered "moving" --
+        // holding position at rest, instead of following the orb's raw
+        // position every frame, hides residual sensor jitter that would
+        // otherwise read as the avatar sliding around without playing its
+        // walk animation. Y still tracks floorY/heightOffset live even at
+        // rest (those come from scene/param state, not sensor noise).
+        // Heading is likewise only picked while moving, so a stop doesn't
+        // snap it to an arbitrary angle.
+        if (this._moving) {
+            this.entity.setPosition(pos.x, y, pos.z);
+
+            const targetYaw = Math.atan2(this._velX, this._velZ) * (180 / Math.PI) + this._faceOffsetDeg;
             let delta = targetYaw - this._yaw;
             delta = ((delta + 180) % 360 + 360) % 360 - 180; // wrap to [-180,180]
             this._yaw += delta * smoothFactor(this._turnSmoothing, dt);
             this.entity.setLocalEulerAngles(0, this._yaw, 0);
+        } else {
+            const cur = this.entity.getPosition();
+            this.entity.setPosition(cur.x, y, cur.z);
         }
     }
 
