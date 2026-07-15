@@ -496,6 +496,7 @@ body.minimap-on #help { bottom: 260px; }
 body.display-mode #help,
 body.display-mode .cp,
 body.display-mode .cp-fab,
+body.display-mode .display-fab,
 body.display-mode .radar-minimap { display: none !important; }
 
 .display-fab {
@@ -521,11 +522,3 @@ body.display-mode .radar-minimap { display: none !important; }
 }
 .display-fab:hover { background: rgba(25, 160, 255, 0.2); }
 .display-fab:active { transform: scale(0.94); }
-/* In display mode keep the exit toggle fully visible with a solid surface. */
-body.display-mode .display-fab {
-    opacity: 1;
-    background: rgb(12, 13, 20);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-}
-body.display-mode .display-fab:hover { background: rgb(25, 28, 38); }

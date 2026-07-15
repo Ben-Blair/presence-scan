@@ -618,39 +618,52 @@ function generateDefaultAnchors(center, halfExtents) {
 }
 
 /**
- * Build the floating "display mode" toggle. Display mode hides every on-screen
- * overlay (settings panel, minimap, help, in-scene sensor gizmo) for a clean
- * presentation/kiosk view. Returns an object whose `on` flag the update loop
- * reads to suppress the in-scene overlay (CSS handles the DOM chrome).
+ * Build the floating "display mode" toggle. Display mode takes the page true
+ * fullscreen (no browser chrome) and hides every on-screen overlay (settings
+ * panel, minimap, help, in-scene sensor gizmo) for a clean presentation/kiosk
+ * view. Returns an object whose `on` flag the update loop reads to suppress the
+ * in-scene overlay (CSS handles the DOM chrome).
+ *
+ * Display mode *is* fullscreen: `document.fullscreenElement` is the single
+ * source of truth and only `fullscreenchange` writes `state.on`. Escape is
+ * swallowed by the browser to exit fullscreen and never reaches the page, so
+ * reacting to the event — rather than to the click/keypress that requested it —
+ * is what keeps the body class in step however the user leaves.
  */
 function createDisplayToggle() {
     // Boot with controls visible everywhere — including the kiosk/Pages build — so
     // the settings panel is reachable on load. Press V (or the 🖥 button) for the
-    // clean presentation view.
+    // clean presentation view; Esc or V comes back out (the FAB itself is hidden in
+    // display mode, so it needs no exit-state title).
     const state = { on: false };
     const fab = document.createElement('button');
     fab.className = 'display-fab';
     fab.setAttribute('aria-label', 'Toggle display mode');
+    fab.title = 'Display mode — fullscreen, hide controls (V)';
     fab.textContent = '🖥';
-    const applyState = () => {
-        document.body.classList.toggle('display-mode', state.on);
-        fab.title = state.on
-            ? 'Exit display mode — show controls (V)'
-            : 'Display mode — hide controls (V)';
-    };
-    const toggle = () => {
-        state.on = !state.on;
-        applyState();
+    const setState = (on) => {
+        if (state.on === on) return;
+        state.on = on;
+        document.body.classList.toggle('display-mode', on);
         // Leaving display mode re-reveals the settings panel, but its page-stack
-        // height was last measured while `.cp` sat behind `display: none` (e.g.
-        // the kiosk build boots straight into display mode) and got baked in as
-        // 0px. The panel only re-measures on a window `resize`, so fire one here
-        // — same trick buildSection() uses when expanding a collapsed section.
+        // height was last measured while `.cp` sat behind `display: none` and got
+        // baked in as 0px. The panel only re-measures on a window `resize`, so fire
+        // one here — same trick buildSection() uses when expanding a collapsed
+        // section.
         window.dispatchEvent(new Event('resize'));
     };
+    // Request the transition only; setState runs when the browser confirms it. A
+    // rejected request (no user gesture, blocked by permissions policy) leaves the
+    // overlays up, which is correct when display mode means fullscreen.
+    const toggle = () => {
+        const req = state.on
+            ? document.exitFullscreen()
+            : document.documentElement.requestFullscreen();
+        req?.catch(() => {});
+    };
+    document.addEventListener('fullscreenchange', () => setState(!!document.fullscreenElement));
     fab.addEventListener('click', toggle);
     document.body.appendChild(fab);
-    applyState();
     return Object.assign(state, { element: fab, toggle });
 }
 
